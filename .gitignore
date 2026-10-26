@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+tests/e2e/_work/
+spike/ff-profile/
+spike/vscode-ud/
+spike/vscode-ext/
+spike/*.log
+spike/term_out.txt

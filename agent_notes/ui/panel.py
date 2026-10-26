@@ -1,0 +1,647 @@
+"""The always-on-top floating panel that holds pending annotations."""
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPropertyAnimation, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QDrag, QGuiApplication, QPainter, QPalette
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
+                               QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
+                               QSizeGrip, QToolButton, QVBoxLayout, QWidget)
+
+from ..core.models import PENDING, SENT, Annotation, AnnoType
+from .theme import C
+
+if TYPE_CHECKING:
+    from ..app import Controller
+
+MIME = 'application/x-agent-notes-id'
+APP_NAMES = {'firefox': 'Firefox', 'firefox_firefox': 'Firefox', 'code': 'VS Code', 'google-chrome': 'Chrome', 'chromium': 'Chromium',
+             'chromium-browser': 'Chromium', 'gnome-terminal-server': '终端', 'cursor': 'Cursor'}
+
+
+def app_label(source: dict) -> str:
+    cls = (source.get('wm_class') or '').lower()
+    return APP_NAMES.get(cls) or source.get('app') or source.get('wm_class') or '未知来源'
+
+
+def source_label(source: dict, n: int = 40) -> str:
+    title = source.get('title') or ''
+    title = title if len(title) <= n else title[:n - 1] + '…'
+    return f'{app_label(source)} · {title}' if title else app_label(source)
+
+
+def short_hotkey(spec: str) -> str:
+    """'Shift+Alt+Return' -> '⇧⌥↵' for button labels."""
+    sym = {'shift': '⇧', 'alt': '⌥', 'ctrl': '⌃', 'control': '⌃', 'super': '❖', 'return': '↵', 'enter': '↵',
+           'space': '␣'}
+    return ''.join(sym.get(p.strip().lower(), p.strip().upper()) for p in spec.split('+') if p.strip())
+
+
+def _elide(text: str, n: int) -> str:
+    t = ' '.join(text.split())
+    return t if len(t) <= n else t[:n - 1] + '…'
+
+
+class Card(QFrame):
+    def __init__(self, ann: Annotation, atype: AnnoType, panel: 'FloatingPanel'):
+        super().__init__(objectName='card')
+        self.ann, self.panel = ann, panel
+        self._press: QPoint | None = None
+        self.setProperty('sent', ann.status == SENT)
+        self.setStyleSheet(f'QFrame#card {{ border-left: 3px solid {atype.color}; }}')
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 7, 10, 8)
+        lay.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(6)
+        self.check = QCheckBox()
+        pal = self.check.palette()
+        pal.setColor(QPalette.Base, QColor(C['check_base']))
+        self.check.setPalette(pal)
+        self.check.setChecked(ann.checked)
+        self.check.setToolTip('勾选后会再次填入' if ann.status == SENT else '')
+        self.check.toggled.connect(lambda on: panel.ctl.store.update(ann.id, checked=on))
+        name = QLabel(atype.name)
+        name.setStyleSheet(f'color: {atype.color}; font-weight: 600;')
+        src = QLabel(_elide(app_label(ann.source), 18), objectName='faint')
+        src.setToolTip(source_label(ann.source, 200))
+        top.addWidget(self.check)
+        top.addWidget(name)
+        top.addWidget(src)
+        top.addStretch(1)
+        if ann.status == SENT:
+            top.addWidget(QLabel('已发送', objectName='badge'))
+        top.addWidget(QLabel(time.strftime('%H:%M', time.localtime(ann.created_at)), objectName='faint'))
+        self.del_btn = QToolButton(objectName='cardDelete')
+        self.del_btn.setText('✕')
+        self.del_btn.setToolTip('删除这条批注')
+        self.del_btn.setCursor(Qt.PointingHandCursor)
+        self.del_btn.clicked.connect(lambda: panel.ctl.store.delete([ann.id]))
+        sp = self.del_btn.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)      # no layout jump when it appears on hover
+        self.del_btn.setSizePolicy(sp)
+        self.del_btn.hide()
+        top.addWidget(self.del_btn)
+        lay.addLayout(top)
+        if ann.quote.strip():
+            q = QLabel(f'「{_elide(ann.quote, 150)}」', objectName='quote')
+            q.setWordWrap(True)
+            q.setToolTip(ann.quote[:2000])
+            lay.addWidget(q)
+        if ann.comment.strip():
+            c = QLabel(ann.comment.strip(), objectName='comment')
+            c.setWordWrap(True)
+            lay.addWidget(c)
+
+    def enterEvent(self, e) -> None:
+        self.del_btn.show()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:
+        self.del_btn.hide()
+        super().leaveEvent(e)
+
+    def mouseDoubleClickEvent(self, e) -> None:
+        self.panel.edit(self.ann.id)
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton:
+            self._press = e.position().toPoint()
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e) -> None:
+        if self._press is None or (e.position().toPoint() - self._press).manhattanLength() \
+                < QApplication.startDragDistance():
+            return
+        self._press = None
+        mime = QMimeData()
+        mime.setData(MIME, self.ann.id.encode())
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(e.position().toPoint())
+        drag.exec(Qt.MoveAction)
+
+    def mouseReleaseEvent(self, e) -> None:
+        self._press = None
+        super().mouseReleaseEvent(e)
+
+    def contextMenuEvent(self, e) -> None:
+        a, ctl = self.ann, self.panel.ctl
+        m = QMenu(self)
+        m.addAction('编辑', lambda: self.panel.edit(a.id))
+        m.addAction('切换到来源窗口', lambda: ctl.goto_source(a))
+        m.addAction('复制引用原文', lambda: QGuiApplication.clipboard().setText(a.quote))
+        if a.status == SENT:
+            m.addAction('标记为待发送', lambda: ctl.store.set_status([a.id], PENDING, checked=True))
+        else:
+            m.addAction('标记为已发送', lambda: ctl.store.set_status([a.id], SENT, checked=False))
+        m.addSeparator()
+        m.addAction('删除', lambda: ctl.store.delete([a.id]))
+        m.exec(e.globalPos())
+
+
+class CardList(QWidget):
+    """Vertical list of cards that supports drag-to-reorder."""
+    reordered = Signal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(8, 4, 8, 4)
+        self._lay.setSpacing(6)
+        self._lay.addStretch(1)
+        self._cards: list[Card] = []
+        self._drop_y: int | None = None
+
+    def set_widgets(self, cards: list[Card], empty: QWidget | None) -> None:
+        while self._lay.count() > 1:
+            w = self._lay.takeAt(0).widget()
+            if w is not None:
+                w.hide()            # deleteLater() alone leaves the old card painted until the loop runs
+                w.deleteLater()
+        self._cards = cards
+        for i, c in enumerate(cards):
+            self._lay.insertWidget(i, c)
+        if empty is not None:
+            self._lay.insertWidget(0, empty)
+
+    def _index_at(self, y: int) -> int:
+        for i, c in enumerate(self._cards):
+            if y < c.geometry().center().y():
+                return i
+        return len(self._cards)
+
+    def dragEnterEvent(self, e) -> None:
+        if e.mimeData().hasFormat(MIME):
+            e.acceptProposedAction()
+
+    def dragMoveEvent(self, e) -> None:
+        i = self._index_at(e.position().toPoint().y())
+        if self._cards:
+            self._drop_y = (self._cards[i].geometry().top() - 3 if i < len(self._cards)
+                            else self._cards[-1].geometry().bottom() + 3)
+        self.update()
+        e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e) -> None:
+        self._drop_y = None
+        self.update()
+
+    def dropEvent(self, e) -> None:
+        moved = bytes(e.mimeData().data(MIME)).decode()
+        i = self._index_at(e.position().toPoint().y())
+        ids = [c.ann.id for c in self._cards]
+        if moved in ids:
+            before = ids[i] if i < len(ids) else None
+            ids.remove(moved)
+            ids.insert(ids.index(before) if before in ids else len(ids), moved)
+            self.reordered.emit(ids)
+        self._drop_y = None
+        e.acceptProposedAction()
+
+    def paintEvent(self, e) -> None:
+        super().paintEvent(e)
+        if self._drop_y is not None:
+            p = QPainter(self)
+            p.fillRect(QRect(10, self._drop_y - 1, self.width() - 20, 2), QColor(C['accent']))
+
+
+class EditDialog(QDialog):
+    def __init__(self, ann: Annotation, types: list[AnnoType], parent: QWidget):
+        super().__init__(parent)
+        self.setWindowTitle('编辑批注')
+        self.setMinimumWidth(420)
+        lay = QVBoxLayout(self)
+        if ann.quote.strip():
+            q = QLabel(f'「{_elide(ann.quote, 300)}」', objectName='quote')
+            q.setWordWrap(True)
+            lay.addWidget(q)
+        self.type = QComboBox()
+        for t in types:
+            self.type.addItem(t.name, t.id)
+        idx = self.type.findData(ann.type_id)
+        self.type.setCurrentIndex(max(idx, 0))
+        self.comment = QPlainTextEdit(ann.comment)
+        self.comment.setPlaceholderText('补充说明 / 追问内容')
+        self.comment.setFixedHeight(96)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setText('保存')
+        buttons.button(QDialogButtonBox.Cancel).setText('取消')
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        for w in (self.type, self.comment, buttons):
+            lay.addWidget(w)
+
+
+class FloatingPanel(QWidget):
+    def __init__(self, ctl: 'Controller'):
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.ctl = ctl
+        self.setWindowTitle('Agent Notes')
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setMinimumSize(300, 64)
+        self._collapsed = False
+        self._pinned = bool(ctl.state.get('panel', {}).get('pinned', False))
+        self._expanded_geo = QRect()
+        self._poller = QTimer(self, interval=self.POLL_MS, timeout=self._track_pointer)
+        self._grace_until = 0.0
+        self._filter = ''          # '' = all sources
+        self._save_timer = QTimer(self, singleShot=True, interval=600, timeout=self._save_geometry)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        frame = QFrame(objectName='panel')
+        outer.addWidget(frame)
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # header (drag handle)
+        self._header = QWidget()
+        self._header.setCursor(Qt.SizeAllCursor)
+        hl = QHBoxLayout(self._header)
+        hl.setContentsMargins(12, 8, 6, 6)
+        self._title = QLabel('批注', objectName='title')
+        self._count = QLabel('', objectName='faint')
+        hl.addWidget(self._title)
+        hl.addWidget(self._count)
+        hl.addStretch(1)
+        self._menu_btn = self._tool('⋯', '菜单')
+        self._menu_btn.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(self)
+        menu.addAction('打开配置文件', ctl.open_config)
+        menu.addAction('重新加载配置', ctl.reload_config)
+        menu.addSeparator()
+        menu.addAction('退出', ctl.quit)
+        self._menu_btn.setMenu(menu)
+        self._trash_btn = self._tool('🗑', '删除 / 清空')
+        self._trash_btn.setPopupMode(QToolButton.InstantPopup)
+        self._trash_menu = QMenu(self)
+        self._trash_menu.aboutToShow.connect(self._fill_trash_menu)
+        self._trash_btn.setMenu(self._trash_menu)
+        self._pin_btn = self._tool('📌', '固定展开：鼠标离开后不自动收起')
+        self._pin_btn.setCheckable(True)
+        self._pin_btn.setChecked(self._pinned)
+        self._pin_btn.toggled.connect(self.set_pinned)
+        self._close_btn = self._tool('✕', '隐藏')
+        self._close_btn.clicked.connect(self.hide)
+        for b in (self._trash_btn, self._menu_btn, self._pin_btn, self._close_btn):
+            hl.addWidget(b)
+        lay.addWidget(self._header)
+
+        # body
+        self._body = QWidget()
+        bl = QVBoxLayout(self._body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(6)
+        fl = QHBoxLayout()
+        fl.setContentsMargins(10, 0, 10, 0)
+        self._filter_box = QComboBox()
+        self._filter_box.currentIndexChanged.connect(self._on_filter)
+        fl.addWidget(self._filter_box, 1)
+        bl.addLayout(fl)
+        self._list = CardList()
+        self._list.reordered.connect(ctl.store.reorder)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(self._list)
+        bl.addWidget(scroll, 1)
+        # preview: shows exactly what 填入 / 仅引用 would paste
+        self._preview_box = QWidget()
+        pvl = QVBoxLayout(self._preview_box)
+        pvl.setContentsMargins(10, 0, 10, 0)
+        pvl.setSpacing(4)
+        modes = QHBoxLayout()
+        modes.addWidget(QLabel('将要填入：', objectName='faint'))
+        self._pv_full = self._tool('完整', '与「填入」相同：提示语 + 每条批注的类型说明')
+        self._pv_plain = self._tool('仅引用', '与「仅引用」相同：只有引用和批注')
+        for b in (self._pv_full, self._pv_plain):
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, plain=b is self._pv_plain: self._set_preview_mode(plain))
+            modes.addWidget(b)
+        modes.addStretch(1)
+        pvl.addLayout(modes)
+        self._preview = QPlainTextEdit()
+        self._preview.setReadOnly(True)
+        self._preview.setFixedHeight(150)
+        self._preview.setPlaceholderText('没有勾选的批注。勾选上方卡片（已发送的也可以重新勾选）后，这里显示将要填入的内容。')
+        pvl.addWidget(self._preview)
+        self._preview_box.hide()
+        self._preview_plain = False
+        self._set_preview_mode(False)
+        bl.addWidget(self._preview_box)
+        foot = QHBoxLayout()
+        foot.setContentsMargins(10, 2, 4, 8)
+        self._preview_btn = QPushButton('预览')
+        self._preview_btn.setCheckable(True)
+        self._preview_btn.toggled.connect(self._toggle_preview)
+        self._plain_btn = QPushButton('仅引用')
+        self._plain_btn.setToolTip('只填入引用和批注，不加提示语和类型说明')
+        self._plain_btn.clicked.connect(lambda: ctl.fill(plain=True))
+        self._fill_btn = QPushButton('填入', objectName='primary')
+        self._fill_btn.setToolTip('填入完整 prompt（提示语 + 每条批注的类型说明）')
+        self._fill_btn.clicked.connect(lambda: ctl.fill())
+        foot.addWidget(self._preview_btn)
+        foot.addStretch(1)
+        foot.addWidget(self._plain_btn)
+        foot.addWidget(self._fill_btn)
+        foot.addWidget(QSizeGrip(self), 0, Qt.AlignBottom | Qt.AlignRight)
+        bl.addLayout(foot)
+        lay.addWidget(self._body, 1)
+
+        # Translucent while idle so it doesn't hide what's behind it; solid while hovered/focused/just updated.
+        self._fade = QPropertyAnimation(self, b'windowOpacity', self)
+        self._fade.setDuration(160)
+        self.update_opacity(animate=False)
+        self._restore_geometry()
+
+    def _tool(self, text: str, tip: str) -> QToolButton:
+        b = QToolButton()
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setCursor(Qt.ArrowCursor)
+        return b
+
+    # ---- data ---------------------------------------------------------------------------------------------
+    def refresh(self) -> None:
+        items = self.ctl.store.all()
+        types = self.ctl.cfg.type_map
+        # filter box: all + one entry per source group
+        groups: dict[str, tuple[str, int]] = {}
+        for a in items:
+            label, n = groups.get(a.group_key, (source_label(a.source, 34), 0))
+            groups[a.group_key] = (source_label(a.source, 34), n + (a.status == PENDING))
+        self._filter_box.blockSignals(True)
+        self._filter_box.clear()
+        self._filter_box.addItem(f'全部来源 · {sum(a.status == PENDING for a in items)} 条待发送', '')
+        for key, (label, n) in groups.items():
+            self._filter_box.addItem(f'{label} · {n}', key)
+        idx = self._filter_box.findData(self._filter)
+        if idx < 0:
+            self._filter = ''
+            idx = 0
+        self._filter_box.setCurrentIndex(idx)
+        self._filter_box.blockSignals(False)
+
+        shown = self.visible_items(items)
+        fallback = AnnoType(id='?', name='未知类型')
+        cards = [Card(a, types.get(a.type_id) or fallback, self) for a in shown]
+        empty = None
+        if not cards:
+            hk = self.ctl.cfg.data['hotkeys'].get('menu') or '快捷键'
+            empty = QLabel(f'在任意 Agent 窗口中选中文字，\n按 {hk} 添加批注', objectName='empty')
+            empty.setAlignment(Qt.AlignCenter)
+        self._list.set_widgets(cards, empty)
+        toggle = self.ctl.cfg.data['hotkeys'].get('toggle_panel')
+        self._close_btn.setToolTip(f'隐藏（{toggle} 重新显示）' if toggle else '隐藏')
+        pending = sum(a.status == PENDING for a in items)
+        self._count.setText(f'{pending} 条待发送' if pending else '')
+        n = len(self.fill_items(items))
+        hk = self.ctl.cfg.data['hotkeys']
+        fill_key = f"  {short_hotkey(hk['fill'])}" if hk.get('fill') else ''
+        plain_key = f"  {short_hotkey(hk['fill_plain'])}" if hk.get('fill_plain') else ''
+        self._fill_btn.setEnabled(n > 0)
+        self._plain_btn.setEnabled(n > 0)
+        self._fill_btn.setText((f'填入 {n} 条' if n else '填入') + fill_key)
+        self._plain_btn.setText('仅引用' + plain_key)
+        self._update_preview(items)
+
+    def visible_items(self, items: list[Annotation] | None = None) -> list[Annotation]:
+        items = self.ctl.store.all() if items is None else items
+        return [a for a in items if not self._filter or a.group_key == self._filter]
+
+    def prompt_items(self, items: list[Annotation] | None = None) -> list[Annotation]:
+        """The list shows newest first; the prompt numbers them bottom-up, i.e. in the order they were added."""
+        return list(reversed(self.fill_items(items)))
+
+    def fill_items(self, items: list[Annotation] | None = None) -> list[Annotation]:
+        return [a for a in self.visible_items(items) if a.checked]   # sent ones too, if re-checked
+
+    def _on_filter(self, idx: int) -> None:
+        self._filter = self._filter_box.itemData(idx) or ''
+        self.refresh()
+
+    def _toggle_preview(self, on: bool) -> None:
+        self._preview_box.setVisible(on)
+        self._update_preview()
+
+    def _set_preview_mode(self, plain: bool) -> None:
+        self._preview_plain = plain
+        self._pv_full.setChecked(not plain)
+        self._pv_plain.setChecked(plain)
+        self._update_preview()
+
+    def _update_preview(self, items: list[Annotation] | None = None) -> None:
+        if not self._preview_box.isVisible():
+            return
+        chosen = self.prompt_items(items)
+        self._preview.setPlainText(self.ctl.compose(chosen, plain=self._preview_plain) if chosen else '')
+
+    # ---- delete / clear -------------------------------------------------------------------------------------
+    def _fill_trash_menu(self) -> None:
+        """Built on open so the counts are current; everything applies to the current source filter."""
+        m = self._trash_menu
+        m.clear()
+        shown = self.visible_items()
+        checked = [a for a in shown if a.checked]
+        sent = [a for a in shown if a.status == SENT]
+        scope = '' if not self._filter else '（当前来源）'
+        act = m.addAction(f'删除已勾选的 {len(checked)} 条', lambda: self.delete_items(checked))
+        act.setEnabled(bool(checked))
+        act = m.addAction(f'清空已发送的 {len(sent)} 条{scope}', lambda: self.delete_items(sent))
+        act.setEnabled(bool(sent))
+        m.addSeparator()
+        act = m.addAction(f'清空全部 {len(shown)} 条{scope}…', lambda: self.delete_items(shown, confirm=True))
+        act.setEnabled(bool(shown))
+
+    def delete_items(self, items: list[Annotation], confirm: bool = False) -> bool:
+        if not items:
+            return False
+        if confirm:
+            box = QMessageBox(QMessageBox.Warning, '清空批注', f'确定删除这 {len(items)} 条批注？删除后无法恢复。',
+                              QMessageBox.Yes | QMessageBox.Cancel, self)
+            box.button(QMessageBox.Yes).setText('删除')
+            box.button(QMessageBox.Cancel).setText('取消')
+            if box.exec() != QMessageBox.Yes:
+                return False
+        self.ctl.store.delete([a.id for a in items])
+        return True
+
+    def edit(self, ann_id: str) -> None:
+        a = self.ctl.store.get(ann_id)
+        if a is None:
+            return
+        dlg = EditDialog(a, self.ctl.cfg.types, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.ctl.store.update(a.id, type_id=dlg.type.currentData(), comment=dlg.comment.toPlainText().strip())
+
+    def reveal(self) -> None:
+        """Make sure a newly added annotation is visible; a collapsed bar just updates its count."""
+        if not self.isVisible():
+            self.show_panel()
+
+    # ---- auto-collapse --------------------------------------------------------------------------------------
+    # Idle: a small see-through bar with the count. The pointer coming within `expand_distance` px of the bar
+    # expands it; going farther than that from the full panel collapses it again (same margin both ways, so it
+    # can't flicker at the edge). Our own menus/dialogs keep it open.
+    POLL_MS = 80
+
+    def _auto(self) -> bool:
+        return bool(self.ctl.cfg.panel.get('auto_collapse', True)) and not self._pinned
+
+    def _pointer(self) -> QPoint:
+        return QCursor.pos()
+
+    def _near(self, margin: int | None = None) -> bool:
+        m = int(self.ctl.cfg.panel.get('expand_distance', 40)) if margin is None else margin
+        return self.frameGeometry().adjusted(-m, -m, m, m).contains(self._pointer())
+
+    def _cursor_inside(self) -> bool:
+        return self._near(0)
+
+    def _busy_ui(self) -> bool:
+        return QApplication.activePopupWidget() is not None or QApplication.activeModalWidget() is not None
+
+    def _track_pointer(self) -> None:
+        if not self.isVisible() or not self._auto():
+            self._poller.stop()
+            return
+        near = self._near()
+        if self._collapsed and near:
+            self.set_collapsed(False)
+        elif not self._collapsed and not near and not self._busy_ui() and time.monotonic() >= self._grace_until:
+            self.set_collapsed(True)
+
+    def _sync_poller(self) -> None:
+        if self.isVisible() and self._auto():
+            self._poller.start()
+        else:
+            self._poller.stop()
+
+    def set_collapsed(self, on: bool) -> None:
+        if on == self._collapsed:
+            return
+        if on:
+            self._expanded_geo = self.geometry()
+            self._body.hide()
+            self.setMinimumSize(0, 0)
+            w = max(self._header.sizeHint().width() + 8, 200)
+            h = self._header.sizeHint().height() + 2
+            self.setFixedSize(w, h)
+            self.move(self._expanded_geo.right() - w + 1, self._expanded_geo.y())   # keep the right edge
+        else:
+            self.setMinimumSize(300, 64)
+            self.setMaximumSize(16777215, 16777215)
+            self._body.show()
+            self.setGeometry(self._expanded_geo)
+        self._collapsed = on
+        self.update_opacity(animate=False)
+        self._save_timer.start()
+
+    def set_pinned(self, on: bool) -> None:
+        self._pinned = on
+        if self._pin_btn.isChecked() != on:
+            self._pin_btn.setChecked(on)
+        if on:
+            self.set_collapsed(False)
+        self._sync_poller()
+        self.update_opacity()
+        self._save_timer.start()
+
+    def config_changed(self) -> None:
+        if not self._auto():
+            self.set_collapsed(False)
+        self._sync_poller()
+        self.update_opacity(animate=False)
+
+    # ---- opacity ------------------------------------------------------------------------------------------
+    def target_opacity(self) -> float:
+        p = self.ctl.cfg.panel
+        if p.get('auto_collapse', True):
+            solid = not self._collapsed
+        else:
+            solid = self._cursor_inside() or self.isActiveWindow()
+        value = p.get('opacity', 0.96) if solid else p.get('idle_opacity', 0.5)
+        return min(1.0, max(0.15, float(value)))
+
+    def update_opacity(self, animate: bool = True) -> None:
+        target = self.target_opacity()
+        self._fade.stop()
+        if animate and self.isVisible():
+            self._fade.setStartValue(self.windowOpacity())
+            self._fade.setEndValue(target)
+            self._fade.start()
+        else:
+            self.setWindowOpacity(target)
+
+    def enterEvent(self, e) -> None:
+        if self._collapsed:
+            self.set_collapsed(False)
+        self.update_opacity()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:
+        self.update_opacity()
+        super().leaveEvent(e)
+
+    def changeEvent(self, e) -> None:
+        if e.type() == QEvent.ActivationChange:
+            self.update_opacity()
+        super().changeEvent(e)
+
+    def hideEvent(self, e) -> None:
+        self._poller.stop()
+        super().hideEvent(e)
+
+    # ---- window behaviour -----------------------------------------------------------------------------------
+    def show_panel(self) -> None:
+        self.show()
+        self.raise_()
+        self._grace_until = time.monotonic() + 1.5    # let the user see it appear before it tucks away
+        self._sync_poller()
+
+    def toggle(self) -> None:
+        self.hide() if self.isVisible() else self.show_panel()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton and self._header.geometry().contains(e.position().toPoint()):
+            if self.windowHandle() and self.windowHandle().startSystemMove():
+                return
+        super().mousePressEvent(e)
+
+    def mouseDoubleClickEvent(self, e) -> None:
+        if self._header.geometry().contains(e.position().toPoint()):
+            self.set_pinned(not self._pinned)
+
+    def moveEvent(self, e) -> None:
+        if self._collapsed:   # dragging the bar moves where the full panel will open (right-aligned)
+            g = self._expanded_geo
+            self._expanded_geo = QRect(self.x() + self.width() - g.width(), self.y(), g.width(), g.height())
+        self._save_timer.start()
+        super().moveEvent(e)
+
+    def resizeEvent(self, e) -> None:
+        self._save_timer.start()
+        super().resizeEvent(e)
+
+    def _restore_geometry(self) -> None:
+        st = self.ctl.state.get('panel', {})
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        w, h = st.get('w', 380), st.get('h', 560)
+        x, y = st.get('x', screen.right() - w - 24), st.get('y', screen.top() + 120)
+        if not screen.intersects(QRect(x, y, w, h)):
+            x, y = screen.right() - w - 24, screen.top() + 120
+        self.setGeometry(x, y, w, h)
+        self._expanded_geo = QRect(x, y, w, h)
+
+    def _save_geometry(self) -> None:
+        g = self._expanded_geo if self._collapsed else self.geometry()   # always remember the full panel
+        self.ctl.state['panel'] = {'x': g.x(), 'y': g.y(), 'w': g.width(), 'h': g.height(),
+                                   'pinned': self._pinned}
+        self.ctl.save_state()
