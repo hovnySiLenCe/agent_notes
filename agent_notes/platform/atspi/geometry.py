@@ -83,8 +83,13 @@ def intersect(a: Rect, b: Rect) -> Rect | None:
 def visible_area(node) -> Rect | None:
     """Intersection of the extents of the node's containers up to its window: text scrolled out of a scroll
     pane still reports on-screen-looking coordinates, but lies outside its container's box.
-    Returns None when nothing is known, EMPTY when the node is scrolled out of view completely."""
+    Returns None when nothing is known, EMPTY when the node is scrolled out of view completely.
+
+    Web content stops at its outermost document: the browser/editor UI around it adds nothing the window rect
+    doesn't, and Electron apps report their native views in logical pixels but web content in physical ones
+    (at 2x scaling the two never intersect)."""
     clip: Rect | None = None
+    doc_clip: Rect | None = None                   # clip as of the outermost web document passed so far
     n = node.get_parent()
     while n is not None:
         try:
@@ -97,8 +102,10 @@ def visible_area(node) -> Rect | None:
         if r is not None:                          # zero-size wrappers (display: contents …) don't clip
             clip = r if clip is None else intersect(clip, r)
             if clip is None:
-                return EMPTY
+                return EMPTY if doc_clip is None else doc_clip
+        if role == 'document web':
+            doc_clip = clip
         if role == 'frame':
             break
         n = n.get_parent()
-    return clip
+    return clip if doc_clip is None else doc_clip

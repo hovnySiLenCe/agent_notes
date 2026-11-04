@@ -48,6 +48,23 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertEqual(self.panel.geometry(), full)
         self.assertAlmostEqual(self.panel.target_opacity(), 0.96)     # full panel: solid
 
+    def test_broken_saved_size_is_repaired(self):
+        self.ctl.state['panel'] = {'x': 400, 'y': 300, 'w': 300, 'h': 64}    # the list had no room left
+        panel = FloatingPanel(self.ctl)
+        self.assertGreaterEqual(panel.geometry().height(), 160)
+        panel.deleteLater()
+
+    def test_expanding_reapplies_the_size_the_wm_lost(self):
+        full = self.panel.geometry()
+        self.panel.set_collapsed(True)
+        self.panel.set_collapsed(False)
+        self.panel.resize(300, 64)                    # a late configure from the window manager
+        self.panel._settle()
+        self.assertEqual(self.panel.geometry(), full)
+        self.panel._settle_until = 0
+        self.panel._save_geometry()
+        self.assertEqual((self.ctl.state['panel']['w'], self.ctl.state['panel']['h']), (full.width(), full.height()))
+
     def _pointer_at(self, x, y):
         from PySide6.QtCore import QPoint
         self.panel._pointer = lambda: QPoint(x, y)

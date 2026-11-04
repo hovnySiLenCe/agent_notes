@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ..app import Controller
 
 MIME = 'application/x-agent-notes-id'
+MIN_SIZE = (300, 160)          # expanded panel: room for the header and at least one card
 APP_NAMES = {'firefox': 'Firefox', 'firefox_firefox': 'Firefox', 'code': 'VS Code', 'google-chrome': 'Chrome', 'chromium': 'Chromium',
              'chromium-browser': 'Chromium', 'gnome-terminal-server': '终端', 'cursor': 'Cursor'}
 
@@ -273,13 +274,15 @@ class EditDialog(QDialog):
 
 
 class FloatingPanel(QWidget):
+    _settle_until = 0.0         # until then, sizes reported by the window manager are not saved
+
     def __init__(self, ctl: 'Controller'):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.ctl = ctl
         self.setWindowTitle('Agent Notes')
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setMinimumSize(300, 64)
+        self.setMinimumSize(*MIN_SIZE)
         self._collapsed = False
         self._pinned = bool(ctl.state.get('panel', {}).get('pinned', False))
         self._expanded_geo = QRect()
@@ -620,13 +623,22 @@ class FloatingPanel(QWidget):
             self.setFixedSize(w, h)
             self.move(self._expanded_geo.right() - w + 1, self._expanded_geo.y())   # keep the right edge
         else:
-            self.setMinimumSize(300, 64)
+            self.setMinimumSize(*MIN_SIZE)
             self.setMaximumSize(16777215, 16777215)
             self._body.show()
             self.setGeometry(self._expanded_geo)
+        # The window manager may still report the old size for a moment (seen: the collapsed bar's size
+        # clamped to the minimum got saved as the panel size, leaving no room for the list): don't save
+        # sizes from that window, and re-apply the expanded size once it has settled.
+        self._settle_until = time.monotonic() + 0.5
+        QTimer.singleShot(250, self._settle)
         self._collapsed = on
         self.update_opacity(animate=False)
         self._save_timer.start()
+
+    def _settle(self) -> None:
+        if not self._collapsed and self.size() != self._expanded_geo.size():
+            self.setGeometry(self._expanded_geo)
 
     def set_pinned(self, on: bool) -> None:
         self._pinned = on
@@ -712,13 +724,16 @@ class FloatingPanel(QWidget):
         super().moveEvent(e)
 
     def resizeEvent(self, e) -> None:
-        self._save_timer.start()
+        if time.monotonic() >= self._settle_until:
+            self._save_timer.start()
         super().resizeEvent(e)
 
     def _restore_geometry(self) -> None:
         st = self.ctl.state.get('panel', {})
         screen = QGuiApplication.primaryScreen().availableGeometry()
         w, h = st.get('w', 380), st.get('h', 560)
+        if w < MIN_SIZE[0] or h < MIN_SIZE[1]:      # a broken saved size would hide the list
+            w, h = max(w, 380), 560
         x, y = st.get('x', screen.right() - w - 24), st.get('y', screen.top() + 120)
         if not screen.intersects(QRect(x, y, w, h)):
             x, y = screen.right() - w - 24, screen.top() + 120
@@ -726,6 +741,9 @@ class FloatingPanel(QWidget):
         self._expanded_geo = QRect(x, y, w, h)
 
     def _save_geometry(self) -> None:
+        if time.monotonic() < self._settle_until:
+            self._save_timer.start()
+            return
         g = self._expanded_geo if self._collapsed else self.geometry()   # always remember the full panel
         self.ctl.state['panel'] = {'x': g.x(), 'y': g.y(), 'w': g.width(), 'h': g.height(),
                                    'pinned': self._pinned}

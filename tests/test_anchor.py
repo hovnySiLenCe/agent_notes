@@ -41,5 +41,17 @@ class AnchorTest(unittest.TestCase):
         self.assertEqual(parts('交接时前倾\t01: 0.000\t02: 0.096'), ['交接时前倾', '01: 0.000', '02: 0.096'])
 
 
+class CapturePrimaryTest(unittest.TestCase):
+    def test_primary_extends_the_reported_selection(self):
+        from agent_notes.platform.atspi.capture import _covers_more
+        reported = '先说明进度：配置查看器已经跑起来了。'
+        primary = '先说明进度：配置查看器已经跑起来了。\n\n- 接口检查正常\n- 对比功能可用'
+        self.assertTrue(_covers_more(primary, reported))
+        self.assertTrue(_covers_more('abc\nmiddle\nxyz end', 'abc\nxyz'))         # start + end nodes only
+        self.assertFalse(_covers_more(reported, reported))
+        self.assertFalse(_covers_more('something else entirely, longer', reported))   # stale PRIMARY
+        self.assertFalse(_covers_more('', reported))
+
+
 if __name__ == '__main__':
     unittest.main()

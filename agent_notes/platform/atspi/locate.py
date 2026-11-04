@@ -88,8 +88,8 @@ def _between(nodes: list, first: tuple, last: tuple) -> list[Segment]:
 
 def _fast_path(frame, anchor: dict, quote: str) -> list[Segment] | None:
     path, end_path = anchor.get('path'), anchor.get('end_path')
-    if path is None or anchor.get('start') is None:
-        return None
+    if path is None or anchor.get('start') is None or end_path is None:
+        return None       # (no end recorded: the quote came from PRIMARY and is searched for)
     node, _, _ = node_at(frame, path)
     text = _text(node) if node is not None else None
     if text is None:
