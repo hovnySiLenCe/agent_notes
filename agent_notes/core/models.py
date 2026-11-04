@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, fields
 
 PENDING = 'pending'
 SENT = 'sent'
+RESOLVED = 'resolved'          # the agent's answer took care of it: kept as history, never filled again
 
 INPUT_NONE = 'none'          # save immediately, no comment box
 INPUT_OPTIONAL = 'optional'

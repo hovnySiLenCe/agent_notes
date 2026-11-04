@@ -47,6 +47,10 @@ class X11Platform(Platform):
         from .hotkeys import HotkeyListener
         return HotkeyListener()
 
+    def selection_watcher(self):
+        from .selwatch import SelectionWatcher
+        return SelectionWatcher()
+
     def selection_belongs_to(self, win: WindowInfo) -> bool:
         return windows.primary_owned_by(win.xid)
 

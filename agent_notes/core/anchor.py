@@ -7,6 +7,8 @@ several times, the captured prefix/suffix context and the old offset pick the ri
 """
 from __future__ import annotations
 
+import re
+
 OBJ = '￼'
 
 
@@ -79,5 +81,6 @@ def find_quote(text: str, quote: str, prefix: str = '', suffix: str = '', near: 
 
 
 def parts(quote: str) -> list[str]:
-    """A multi-element selection is captured as the elements' texts joined by newlines."""
-    return [p for p in (x.strip() for x in quote.split('\n')) if p]
+    """A multi-element selection is captured as the elements' texts joined by newlines
+    (copied table rows: cells joined by tabs)."""
+    return [p for p in (x.strip() for x in re.split(r'[\n\t]', quote)) if p]

@@ -17,6 +17,7 @@ from .core.composer import compose
 from .core.models import INPUT_NONE, SENT, Annotation
 from .core.store import Store
 from .highlight import Highlighter
+from .ui.bubble import SelectionBubble
 from .platform.base import WindowInfo, get_platform
 from .ui import theme
 from .ui.panel import FloatingPanel, source_label
@@ -64,6 +65,13 @@ class Controller(QObject):
         self._busy = False
         self._last_external: WindowInfo | None = None
         self._hinted: set[str] = set()                    # apps already told how to enable accessibility
+        self.bubble = SelectionBubble()
+        self.bubble.chosen.connect(lambda type_id: self.begin_capture(type_id or None))
+        self.selwatch = self.platform.selection_watcher()
+        if self.selwatch is not None:
+            self.selwatch.selected.connect(self._on_text_selected)
+            self.selwatch.pressed.connect(self._on_pointer_pressed)
+        self._sync_bubble()
 
         self.worker.submit(self.platform.warm_up)     # the first capture must not pay AT-SPI's cold start
         self.hotkeys = self.platform.hotkey_listener()
@@ -107,8 +115,44 @@ class Controller(QObject):
         elif action == 'toggle_panel':
             self.panel.toggle()
 
+    # ---- selection bubble -----------------------------------------------------------------------------------
+    def bubble_enabled(self) -> bool:
+        return bool(self.cfg.data.get('bubble', {}).get('enabled', True)) and self.state.get('bubble_on', True)
+
+    def set_bubble_enabled(self, on: bool) -> None:
+        self.state['bubble_on'] = on
+        self.save_state()
+        self._sync_bubble()
+
+    def _sync_bubble(self) -> None:
+        conf = self.cfg.data.get('bubble', {})
+        hk = self.cfg.data['hotkeys']
+        n = max(0, min(9, int(conf.get('types', 4))))
+        self.bubble.set_types(self.cfg.types[:n], {**{t.id: t.hotkey for t in self.cfg.types}, '': hk.get('menu', '')})
+        self.bubble.timeout_ms = max(800, int(conf.get('timeout_ms', 3500)))
+        if self.selwatch is None:
+            return
+        if self.bubble_enabled():
+            self.selwatch.start()
+        else:
+            self.selwatch.stop()
+            self.bubble.hide()
+
+    def _on_text_selected(self) -> None:
+        if not self.bubble_enabled() or self._busy or self.popup.isVisible():
+            return
+        win = self.platform.active_window()
+        if win is None or win.pid == os.getpid() or not self.platform.selection_belongs_to(win):
+            return
+        self.bubble.show_at()
+
+    def _on_pointer_pressed(self) -> None:
+        if self.bubble.isVisible() and not self.bubble.contains_pointer():
+            self.bubble.hide()
+
     # ---- capture ----------------------------------------------------------------------------------------------
     def begin_capture(self, type_id: str | None) -> None:
+        self.bubble.hide()
         if self._busy or self.popup.isVisible():
             return
         win = self.platform.active_window()
@@ -285,6 +329,7 @@ class Controller(QObject):
         self.popup.setWindowOpacity(self._popup_opacity())
         self.panel.refresh()
         self.highlighter.poke()
+        self._sync_bubble()
         self.toast.show_message('配置已重新加载', 'ok', 1400, near=self.panel)
 
     def _popup_opacity(self) -> float:
@@ -298,6 +343,9 @@ class Controller(QObject):
 
     def quit(self) -> None:
         self.highlighter.overlay.hide()
+        self.bubble.hide()
+        if self.selwatch is not None:
+            self.selwatch.stop()
         self.hotkeys.stop()
         self.worker.shutdown()
         self.app.quit()

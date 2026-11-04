@@ -38,6 +38,7 @@ class AnchorTest(unittest.TestCase):
 
     def test_parts(self):
         self.assertEqual(parts('first para\n\n second \nthird'), ['first para', 'second', 'third'])
+        self.assertEqual(parts('交接时前倾\t01: 0.000\t02: 0.096'), ['交接时前倾', '01: 0.000', '02: 0.096'])
 
 
 if __name__ == '__main__':

@@ -641,8 +641,85 @@ def scenario_highlight(h: Harness) -> None:
     h.shot('highlight_jump', xid)
 
 
+def bubble_rect(h: Harness) -> tuple[int, int, int, int] | None:
+    """Screen rect of the app's selection bubble while it is shown."""
+    for w in xd.root().query_tree().children:
+        try:
+            pid = w.get_full_property(xd.atom('_NET_WM_PID'), Xatom.CARDINAL)
+            if not pid or not h.app_proc or pid.value[0] != h.app_proc.pid:
+                continue
+            name = w.get_full_property(xd.atom('_NET_WM_NAME'), xd.atom('UTF8_STRING'))
+            if not name or name.value != b'Agent Notes bubble' or w.get_attributes().map_state != X.IsViewable:
+                continue
+            g, o = w.get_geometry(), w.translate_coords(xd.root(), 0, 0)
+            return (-o.x, -o.y, g.width, g.height)
+        except error.XError:
+            continue
+    return None
+
+
+def char_x(pids: set[int], quote: str) -> tuple[int, int, int] | None:
+    """(x inside the first character, vertical middle, x inside the last character) of `quote` on screen."""
+    r0, r1 = quote_rect(pids, quote), quote_rect(pids, quote[-4:])
+    if not r0 or not r1 or not r0[3] or not r1[3]:           # all zeros while the page is being laid out
+        return None
+    return r0[0] + 2, r0[1] + r0[3] // 2, r1[0] + r1[2] - 2
+
+
+def click(x: int, y: int) -> None:
+    d = xd.get()
+    xtest.fake_input(d, X.MotionNotify, x=x, y=y)
+    xtest.fake_input(d, X.ButtonPress, 1)
+    xtest.fake_input(d, X.ButtonRelease, 1)
+    d.sync()
+
+
+def scenario_bubble(h: Harness) -> None:
+    print('[bubble] select with the mouse → type buttons next to the pointer → click one → popup → saved')
+    quote = '防止梯度爆炸的技术'
+    xid, pids = open_firefox(h, 'bb')
+    if not xid:
+        return
+    h.activate(xid)
+    h.check('keyboard / programmatic selection → no bubble',
+            h.select_text(pids, quote) and not h.wait(lambda: bubble_rect(h), 1.2))
+    h.select_text(pids, '\u200b')                                 # clear it again
+    span = h.wait(lambda: char_x(pids, quote), 3)
+    if not h.check('quote located on screen (test setup)', span, str(span)):
+        return
+    x0, y, x1 = span
+    h.drag(x0, y, x1, xid)
+    rect = h.wait(lambda: bubble_rect(h), 3)
+    h.check('mouse selection → bubble appears near the pointer',
+            rect and abs(rect[0] - x1) < 80 and abs(rect[1] - y) < 80, f'bubble {rect}, pointer at ({x1}, {y})')
+    h.check('…without taking the focus', windows.active_xid() == xid)
+    if rect:
+        h.shot('bubble_shown', xid)
+        h.ensure_active(xid)
+        click(rect[0] + rect[2] - 6, y + 200)                    # somewhere else on the page
+        h.check('click elsewhere → bubble hides', h.wait(lambda: not bubble_rect(h), 2))
+    h.drag(x0, y, x1, xid)
+    rect = h.wait(lambda: bubble_rect(h), 3)
+    if not h.check('bubble again after a new selection', rect):
+        return
+    before = len(h.db())
+    h.ensure_active(xid)
+    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: 展开 (expand)
+    popup = h.wait(h.app_active, 4)
+    if not h.check('click a type → popup opens', popup):
+        return
+    h.shot('bubble_popup', popup)
+    h.key('Return', popup)
+    saved = h.wait(lambda: len(h.db()) == before + 1, 3)
+    rows = sorted(h.db(), key=lambda r: r['created_at'])
+    if h.check('annotation saved from the bubble', saved and rows):
+        r = rows[-1]
+        h.check('bubble: type expand, the mouse-selected quote, AT-SPI anchor',
+                r['type_id'] == 'expand' and '梯度爆炸' in r['quote'] and r['anchor'].get('method') == 'atspi', str(r))
+
+
 SCENARIOS = {'firefox': scenario_firefox, 'terminal': scenario_terminal, 'vscode': scenario_vscode,
-             'highlight': scenario_highlight}
+             'highlight': scenario_highlight, 'bubble': scenario_bubble}
 
 
 def main() -> int:

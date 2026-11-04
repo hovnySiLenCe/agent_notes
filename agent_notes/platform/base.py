@@ -34,6 +34,11 @@ class Platform(ABC):
     def hotkey_listener(self):
         """A QObject with `triggered(str action)` / `failed(str spec, str reason)` signals and start/stop."""
 
+    def selection_watcher(self):
+        """A QObject with `selected()` (a mouse gesture selected text) / `pressed()` signals and start/stop,
+        or None when the platform can't tell."""
+        return None
+
     @abstractmethod
     def selection_belongs_to(self, win: WindowInfo) -> bool:
         """Was the system 'primary selection' made in `win`'s application (i.e. not stale text from elsewhere)?"""

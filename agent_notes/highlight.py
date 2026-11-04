@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, QRect, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QRegion
 
-from .core.models import PENDING, Annotation
+from .core.models import PENDING, RESOLVED, Annotation
 from .ui.overlay import HighlightOverlay, Mark
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class Highlighter(QObject):
         focus, mode = self.focus_ids(), self.show_mode()
         out = []
         for a in self.ctl.store.all():
-            if a.id in focus or mode == 'all' or (mode == 'pending' and a.status == PENDING):
+            if a.id in focus or (mode == 'all' and a.status != RESOLVED) or (mode == 'pending' and a.status == PENDING):
                 out.append(a)
         return out
 

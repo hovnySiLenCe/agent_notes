@@ -17,12 +17,15 @@ C = {
     'accent': '#4C8BF5',
     'accent_hover': '#6A9EF7',
     'danger': '#E5484D',
+    'ok': '#3FB27F',
 }
 
 STYLE = """
 QWidget { color: %(text)s; font-size: 13px; }
 QFrame#panel, QFrame#popup { background: %(bg)s; border: 1px solid %(border)s; border-radius: 10px; }
 QFrame#toast { background: %(bg)s; border: 1px solid %(border)s; border-radius: 8px; }
+QFrame#bubble { background: %(bg)s; border: 1px solid %(border)s; border-radius: 8px; }
+QToolButton#bubbleButton { padding: 2px 8px; font-weight: 600; }
 QFrame#card { background: %(surface)s; border: 1px solid %(border)s; border-radius: 8px; }
 QFrame#card:hover { background: %(surface_hover)s; }
 QFrame#card[sent="true"] QLabel#quote { color: %(faint)s; }
@@ -32,6 +35,7 @@ QLabel#muted { color: %(muted)s; }
 QLabel#faint { color: %(faint)s; font-size: 12px; }
 QLabel#quote { color: %(muted)s; }
 QLabel#badge { color: %(faint)s; font-size: 11px; border: 1px solid %(border)s; border-radius: 4px; padding: 0 4px; }
+QLabel#badgeDone { color: %(ok)s; font-size: 11px; border: 1px solid %(ok)s; border-radius: 4px; padding: 0 4px; }
 QLabel#error { color: %(danger)s; font-size: 12px; }
 QLabel#empty { color: %(faint)s; padding: 24px 12px; }
 QPushButton { background: %(surface)s; border: 1px solid %(border)s; border-radius: 6px; padding: 5px 12px; }

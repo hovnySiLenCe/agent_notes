@@ -98,10 +98,24 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertEqual({x.id for x in st.all()}, {a.id, b.id})
         self.panel._fill_trash_menu()
         labels = [act.text() for act in self.panel._trash_menu.actions() if act.text()]
-        self.assertEqual(labels, ['删除已勾选的 1 条', '清空已发送的 1 条', '清空全部 2 条…'])
+        self.assertEqual(labels, ['删除已勾选的 1 条', '清空已发送的 1 条', '清空已解决的 0 条', '清空全部 2 条…'])
         sent = [x for x in st.all() if x.status == SENT]
         self.panel.delete_items(sent)                            # 清空已发送 (history)
         self.assertEqual([x.id for x in st.all()], [b.id])
+
+    def test_resolve_and_reopen(self):
+        from agent_notes.core.models import PENDING, RESOLVED, Annotation
+        st = self.ctl.store
+        a = st.add(Annotation('ask', 'A', created_at=1.0))
+        self.panel.refresh()
+        self.panel._list._cards[0].done_btn.click()             # ✓ on the card
+        self.assertEqual((st.get(a.id).status, st.get(a.id).checked), (RESOLVED, False))
+        self.panel.refresh()
+        card = self.panel._list._cards[0]
+        self.assertEqual(card.done_btn.text(), '↺')
+        self.assertEqual(self.panel.fill_items(st.all()), [])   # resolved items are not filled
+        card.done_btn.click()                                    # reopen
+        self.assertEqual((st.get(a.id).status, st.get(a.id).checked), (PENDING, True))
 
     def test_reveal_does_not_expand_a_collapsed_bar(self):
         self.panel.show()

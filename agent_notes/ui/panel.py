@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
                                QSizeGrip, QToolButton, QVBoxLayout, QWidget)
 
-from ..core.models import PENDING, SENT, Annotation, AnnoType
+from ..core.models import PENDING, RESOLVED, SENT, Annotation, AnnoType
 from .theme import C
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class Card(QFrame):
         super().__init__(objectName='card')
         self.ann, self.panel = ann, panel
         self._press: QPoint | None = None
-        self.setProperty('sent', ann.status == SENT)
+        self.setProperty('sent', ann.status != PENDING)        # dimmed: already sent or resolved
         self.setStyleSheet(f'QFrame#card {{ border-left: 3px solid {atype.color}; }}')
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 7, 10, 8)
@@ -73,13 +73,21 @@ class Card(QFrame):
         top.addStretch(1)
         if ann.status == SENT:
             top.addWidget(QLabel('已发送', objectName='badge'))
+        elif ann.status == RESOLVED:
+            top.addWidget(QLabel('✓ 已解决', objectName='badgeDone'))
         top.addWidget(QLabel(time.strftime('%H:%M', time.localtime(ann.created_at)), objectName='faint'))
         self.loc = QLabel('', objectName='locState')      # where the quote is in its window right now
         self.loc.hide()
         top.addWidget(self.loc)
         self.jump_btn = self._hover_button('⌖', '跳到原文（双击卡片也可以）', lambda: panel.jump(ann))
+        if ann.status == RESOLVED:
+            self.done_btn = self._hover_button('↺', '重新打开（改回待发送）', lambda: panel.set_status(ann, PENDING))
+        else:
+            self.done_btn = self._hover_button('✓', '标记为已解决（不再填入，原文不再高亮）',
+                                               lambda: panel.set_status(ann, RESOLVED))
         self.del_btn = self._hover_button('✕', '删除这条批注', lambda: panel.ctl.store.delete([ann.id]))
         top.addWidget(self.jump_btn)
+        top.addWidget(self.done_btn)
         top.addWidget(self.del_btn)
         lay.addLayout(top)
         if ann.quote.strip():
@@ -117,14 +125,14 @@ class Card(QFrame):
         self.loc.setVisible(bool(text))
 
     def enterEvent(self, e) -> None:
-        self.del_btn.show()
-        self.jump_btn.show()
+        for b in (self.jump_btn, self.done_btn, self.del_btn):
+            b.show()
         self.panel.hover(self.ann.id)
         super().enterEvent(e)
 
     def leaveEvent(self, e) -> None:
-        self.del_btn.hide()
-        self.jump_btn.hide()
+        for b in (self.jump_btn, self.done_btn, self.del_btn):
+            b.hide()
         self.panel.hover(None)
         super().leaveEvent(e)
 
@@ -159,10 +167,12 @@ class Card(QFrame):
         m.addAction('跳到原文', lambda: self.panel.jump(a))
         m.addAction('编辑', lambda: self.panel.edit(a.id))
         m.addAction('复制引用原文', lambda: QGuiApplication.clipboard().setText(a.quote))
-        if a.status == SENT:
-            m.addAction('标记为待发送', lambda: ctl.store.set_status([a.id], PENDING, checked=True))
-        else:
-            m.addAction('标记为已发送', lambda: ctl.store.set_status([a.id], SENT, checked=False))
+        if a.status != PENDING:
+            m.addAction('标记为待发送', lambda: self.panel.set_status(a, PENDING))
+        if a.status == PENDING:
+            m.addAction('标记为已发送', lambda: self.panel.set_status(a, SENT))
+        if a.status != RESOLVED:
+            m.addAction('标记为已解决', lambda: self.panel.set_status(a, RESOLVED))
         m.addSeparator()
         m.addAction('删除', lambda: ctl.store.delete([a.id]))
         m.exec(e.globalPos())
@@ -302,6 +312,9 @@ class FloatingPanel(QWidget):
         self._hl_action = menu.addAction('在原文上显示高亮')
         self._hl_action.setCheckable(True)
         self._hl_action.toggled.connect(self._toggle_highlight)
+        self._bubble_action = menu.addAction('选中文字后显示批注按钮')
+        self._bubble_action.setCheckable(True)
+        self._bubble_action.toggled.connect(lambda on: ctl.set_bubble_enabled(on))
         menu.aboutToShow.connect(self._sync_menu)
         menu.addSeparator()
         menu.addAction('打开配置文件', ctl.open_config)
@@ -466,6 +479,11 @@ class FloatingPanel(QWidget):
         self._hl_action.setChecked(bool(h and h.enabled()))
         self._hl_action.setEnabled(bool(h and h.settings.get('enabled', True)))
         self._hl_action.blockSignals(False)
+        bubble_on = getattr(self.ctl, 'bubble_enabled', None)
+        self._bubble_action.blockSignals(True)
+        self._bubble_action.setChecked(bool(bubble_on and bubble_on()))
+        self._bubble_action.setEnabled(bool(bubble_on and self.ctl.cfg.data.get('bubble', {}).get('enabled', True)))
+        self._bubble_action.blockSignals(False)
 
     def _toggle_highlight(self, on: bool) -> None:
         if self._highlighter():
@@ -510,14 +528,21 @@ class FloatingPanel(QWidget):
         shown = self.visible_items()
         checked = [a for a in shown if a.checked]
         sent = [a for a in shown if a.status == SENT]
+        done = [a for a in shown if a.status == RESOLVED]
         scope = '' if not self._filter else '（当前来源）'
         act = m.addAction(f'删除已勾选的 {len(checked)} 条', lambda: self.delete_items(checked))
         act.setEnabled(bool(checked))
         act = m.addAction(f'清空已发送的 {len(sent)} 条{scope}', lambda: self.delete_items(sent))
         act.setEnabled(bool(sent))
+        act = m.addAction(f'清空已解决的 {len(done)} 条{scope}', lambda: self.delete_items(done))
+        act.setEnabled(bool(done))
         m.addSeparator()
         act = m.addAction(f'清空全部 {len(shown)} 条{scope}…', lambda: self.delete_items(shown, confirm=True))
         act.setEnabled(bool(shown))
+
+    def set_status(self, a: Annotation, status: str) -> None:
+        """Pending items are checked for the next fill; sent and resolved ones are not."""
+        self.ctl.store.set_status([a.id], status, checked=status == PENDING)
 
     def delete_items(self, items: list[Annotation], confirm: bool = False) -> bool:
         if not items:
