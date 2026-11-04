@@ -74,15 +74,12 @@ class Card(QFrame):
         if ann.status == SENT:
             top.addWidget(QLabel('已发送', objectName='badge'))
         top.addWidget(QLabel(time.strftime('%H:%M', time.localtime(ann.created_at)), objectName='faint'))
-        self.del_btn = QToolButton(objectName='cardDelete')
-        self.del_btn.setText('✕')
-        self.del_btn.setToolTip('删除这条批注')
-        self.del_btn.setCursor(Qt.PointingHandCursor)
-        self.del_btn.clicked.connect(lambda: panel.ctl.store.delete([ann.id]))
-        sp = self.del_btn.sizePolicy()
-        sp.setRetainSizeWhenHidden(True)      # no layout jump when it appears on hover
-        self.del_btn.setSizePolicy(sp)
-        self.del_btn.hide()
+        self.loc = QLabel('', objectName='locState')      # where the quote is in its window right now
+        self.loc.hide()
+        top.addWidget(self.loc)
+        self.jump_btn = self._hover_button('⌖', '跳到原文（双击卡片也可以）', lambda: panel.jump(ann))
+        self.del_btn = self._hover_button('✕', '删除这条批注', lambda: panel.ctl.store.delete([ann.id]))
+        top.addWidget(self.jump_btn)
         top.addWidget(self.del_btn)
         lay.addLayout(top)
         if ann.quote.strip():
@@ -95,16 +92,44 @@ class Card(QFrame):
             c.setWordWrap(True)
             lay.addWidget(c)
 
+    def _hover_button(self, text: str, tip: str, slot) -> QToolButton:
+        b = QToolButton(objectName='cardDelete' if text == '✕' else 'cardAction')
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setCursor(Qt.PointingHandCursor)
+        b.clicked.connect(slot)
+        sp = b.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)      # no layout jump when it appears on hover
+        b.setSizePolicy(sp)
+        b.hide()
+        return b
+
+    LOC_TEXT = {'ok': ('◉', '原文在窗口中可见，已高亮'), 'offscreen': ('○', '原文已滚出视野：点 ⌖ 跳过去'),
+                'missing': ('⚠', '在来源窗口中没找到这段原文（页面已关闭或内容已变）')}
+
+    def set_locate_state(self, state: str | None) -> None:
+        text, tip = self.LOC_TEXT.get(state or '', ('', ''))
+        self.loc.setText(text)
+        self.loc.setToolTip(tip)
+        self.loc.setProperty('state', state or '')
+        self.loc.style().unpolish(self.loc)
+        self.loc.style().polish(self.loc)
+        self.loc.setVisible(bool(text))
+
     def enterEvent(self, e) -> None:
         self.del_btn.show()
+        self.jump_btn.show()
+        self.panel.hover(self.ann.id)
         super().enterEvent(e)
 
     def leaveEvent(self, e) -> None:
         self.del_btn.hide()
+        self.jump_btn.hide()
+        self.panel.hover(None)
         super().leaveEvent(e)
 
     def mouseDoubleClickEvent(self, e) -> None:
-        self.panel.edit(self.ann.id)
+        self.panel.jump(self.ann)
 
     def mousePressEvent(self, e) -> None:
         if e.button() == Qt.LeftButton:
@@ -131,8 +156,8 @@ class Card(QFrame):
     def contextMenuEvent(self, e) -> None:
         a, ctl = self.ann, self.panel.ctl
         m = QMenu(self)
+        m.addAction('跳到原文', lambda: self.panel.jump(a))
         m.addAction('编辑', lambda: self.panel.edit(a.id))
-        m.addAction('切换到来源窗口', lambda: ctl.goto_source(a))
         m.addAction('复制引用原文', lambda: QGuiApplication.clipboard().setText(a.quote))
         if a.status == SENT:
             m.addAction('标记为待发送', lambda: ctl.store.set_status([a.id], PENDING, checked=True))
@@ -274,6 +299,11 @@ class FloatingPanel(QWidget):
         self._menu_btn = self._tool('⋯', '菜单')
         self._menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu = QMenu(self)
+        self._hl_action = menu.addAction('在原文上显示高亮')
+        self._hl_action.setCheckable(True)
+        self._hl_action.toggled.connect(self._toggle_highlight)
+        menu.aboutToShow.connect(self._sync_menu)
+        menu.addSeparator()
         menu.addAction('打开配置文件', ctl.open_config)
         menu.addAction('重新加载配置', ctl.reload_config)
         menu.addSeparator()
@@ -398,6 +428,7 @@ class FloatingPanel(QWidget):
             empty = QLabel(f'在任意 Agent 窗口中选中文字，\n按 {hk} 添加批注', objectName='empty')
             empty.setAlignment(Qt.AlignCenter)
         self._list.set_widgets(cards, empty)
+        self.update_locate_states()
         toggle = self.ctl.cfg.data['hotkeys'].get('toggle_panel')
         self._close_btn.setToolTip(f'隐藏（{toggle} 重新显示）' if toggle else '隐藏')
         pending = sum(a.status == PENDING for a in items)
@@ -411,6 +442,34 @@ class FloatingPanel(QWidget):
         self._fill_btn.setText((f'填入 {n} 条' if n else '填入') + fill_key)
         self._plain_btn.setText('仅引用' + plain_key)
         self._update_preview(items)
+
+    # ---- original-text highlights ---------------------------------------------------------------------------
+    def _highlighter(self):
+        return getattr(self.ctl, 'highlighter', None)
+
+    def hover(self, ann_id: str | None) -> None:
+        if self._highlighter():
+            self._highlighter().set_hover(ann_id)
+
+    def jump(self, ann: Annotation) -> None:
+        if self._highlighter():
+            self._highlighter().jump(ann)
+
+    def update_locate_states(self) -> None:
+        states = self._highlighter().states if self._highlighter() else {}
+        for c in self._list._cards:
+            c.set_locate_state(states.get(c.ann.id))
+
+    def _sync_menu(self) -> None:
+        h = self._highlighter()
+        self._hl_action.blockSignals(True)
+        self._hl_action.setChecked(bool(h and h.enabled()))
+        self._hl_action.setEnabled(bool(h and h.settings.get('enabled', True)))
+        self._hl_action.blockSignals(False)
+
+    def _toggle_highlight(self, on: bool) -> None:
+        if self._highlighter():
+            self._highlighter().set_enabled(on)
 
     def visible_items(self, items: list[Annotation] | None = None) -> list[Annotation]:
         items = self.ctl.store.all() if items is None else items
@@ -588,6 +647,7 @@ class FloatingPanel(QWidget):
 
     def leaveEvent(self, e) -> None:
         self.update_opacity()
+        self.hover(None)            # a card rebuilt under the mouse never gets its leave event
         super().leaveEvent(e)
 
     def changeEvent(self, e) -> None:

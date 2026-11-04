@@ -4,7 +4,9 @@ Drives the real app with synthetic input against throwaway Firefox / gnome-termi
 this script starts itself (GPU disabled, nice 19). Safety: every synthetic key/mouse event is preceded by a
 check that the active window is the one we expect, so nothing is ever typed into a window we did not open.
 
-Usage:  .venv/bin/python -m tests.e2e.run_e2e [firefox] [terminal] [vscode]     (default: all)
+Usage:  .venv/bin/python -m tests.e2e.run_e2e [firefox] [terminal] [vscode] [highlight]   (default: all)
+        .venv/bin/python -m tests.e2e.sandbox -- .venv/bin/python -m tests.e2e.run_e2e firefox highlight
+                                         (invisible desktop: safe to run while you work)
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ _preload_xcb_cursor()
 
 from PySide6.QtGui import QClipboard, QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
-from Xlib import X  # noqa: E402
+from Xlib import X, Xatom, error  # noqa: E402
 from Xlib.ext import xtest  # noqa: E402
 
 from agent_notes import config as cfgmod  # noqa: E402
@@ -41,6 +43,21 @@ ORIGINAL_CLIPBOARD = 'E2E-ORIGINAL-CLIPBOARD'
 
 class Abort(Exception):
     pass
+
+
+def spawn(cmd: list[str], **kw) -> subprocess.Popen:
+    """Start a test app. Inside the sandbox, snap apps need a transient systemd scope named like snapd's own
+    (snap-confine refuses to start otherwise); systemd is reached on the real user bus, the app gets the sandbox bus."""
+    exe = cmd[3] if cmd[:2] == ['nice', '-n'] else cmd[0]
+    name = os.path.basename(exe)
+    # /usr/bin/firefox on Ubuntu is a wrapper script around the snap: look at /snap/bin
+    if os.environ.get('AGENT_NOTES_SANDBOX') and os.path.realpath(f'/snap/bin/{name}') == '/usr/bin/snap':
+        real_bus = f"unix:path={os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')}/bus"
+        cmd = ['env', f'DBUS_SESSION_BUS_ADDRESS={real_bus}', 'systemd-run', '--user', '--scope', '--quiet',
+               '--unit', f'snap.{name}.{name}-agent-notes-e2e-{os.getpid()}-{random.randint(0, 99999)}',
+               'env', f"DBUS_SESSION_BUS_ADDRESS={os.environ['DBUS_SESSION_BUS_ADDRESS']}", *cmd]
+    log = open(WORK / f'{os.path.basename(exe)}.log', 'ab')
+    return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, **kw)
 
 
 class Harness:
@@ -120,15 +137,27 @@ class Harness:
             print('   (screenshot failed:', e, ')')
 
     # ---- app under test -------------------------------------------------------------------------------------
-    def start_app(self) -> None:
-        env = dict(os.environ, AGENT_NOTES_CONFIG_DIR=str(self.run_dir / 'config'),
-                   AGENT_NOTES_DATA_DIR=str(self.run_dir / 'data'))
-        log = open(self.run_dir / 'app.log', 'w')
-        self.app_proc = subprocess.Popen(['nice', '-n', '19', sys.executable, '-m', 'agent_notes'],
+    def start_app(self, name: str) -> None:
+        """A fresh app instance with its own config/data per scenario, so scenarios don't see each other's notes."""
+        self.app_dir = self.run_dir / name
+        env = dict(os.environ, AGENT_NOTES_CONFIG_DIR=str(self.app_dir / 'config'),
+                   AGENT_NOTES_DATA_DIR=str(self.app_dir / 'data'))
+        self.app_dir.mkdir(parents=True, exist_ok=True)
+        log = open(self.app_dir / 'app.log', 'w')
+        self.app_proc = subprocess.Popen(['nice', '-n', '19', sys.executable, '-m', 'agent_notes', '--foreground'],
                                          cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         ok = self.wait(lambda: self.panel_xid(), 15)
         if not self.check('app starts and shows the floating panel', ok):
-            raise Abort('app did not start; see ' + str(self.run_dir / 'app.log'))
+            raise Abort('app did not start; see ' + str(self.app_dir / 'app.log'))
+
+    def stop_app(self) -> None:
+        if self.app_proc:
+            self.app_proc.terminate()
+            try:
+                self.app_proc.wait(5)
+            except subprocess.TimeoutExpired:
+                self.app_proc.kill()
+            self.app_proc = None
 
     def panel_xid(self) -> int | None:
         for w in windows.client_list():
@@ -142,7 +171,7 @@ class Harness:
         return i.xid if i and self.app_proc and i.pid == self.app_proc.pid else None
 
     def db(self) -> list[dict]:
-        p = self.run_dir / 'data' / 'notes.db'
+        p = self.app_dir / 'data' / 'notes.db'
         if not p.exists():
             return []
         con = sqlite3.connect(p)
@@ -165,7 +194,7 @@ class Harness:
         self.key(hotkey, target_xid)
         popup = self.wait(self.app_active, 4)
         if not self.check(f'{hotkey}: popup opens and takes focus', popup):
-            tail = (self.run_dir / 'app.log').read_text(encoding='utf-8').splitlines()[-3:]
+            tail = (self.app_dir / 'app.log').read_text(encoding='utf-8').splitlines()[-3:]
             print('   app log tail:', tail)
             return False
         self.pump(0.2)
@@ -182,7 +211,7 @@ class Harness:
         return bool(saved)
 
     def expected_fill(self, rows: list[dict]) -> str:
-        cfg, _ = cfgmod.Config.load(self.run_dir / 'config' / 'config.json')
+        cfg, _ = cfgmod.Config.load(self.app_dir / 'config' / 'config.json')
         items = [Annotation(type_id=r['type_id'], quote=r['quote'], comment=r['comment']) for r in rows]
         return compose(items, cfg.type_map, cfg.prompt)
 
@@ -192,12 +221,7 @@ class Harness:
                 fn()
             except Exception as e:
                 print('cleanup error:', e)
-        if self.app_proc:
-            self.app_proc.terminate()
-            try:
-                self.app_proc.wait(5)
-            except subprocess.TimeoutExpired:
-                self.app_proc.kill()
+        self.stop_app()
 
     # ---- helpers for test apps ----------------------------------------------------------------------------
     def kill_matching(self, pattern: str) -> None:
@@ -256,9 +280,8 @@ class Harness:
 
 
 # ---- scenarios ----------------------------------------------------------------------------------------------
-def scenario_firefox(h: Harness) -> None:
-    print('[firefox] web page with a chat textarea')
-    prof = WORK / 'profiles' / 'ff'
+def open_firefox(h: Harness, profile: str) -> tuple[int | None, set[int]]:
+    prof = WORK / 'profiles' / profile
     prof.mkdir(parents=True, exist_ok=True)
     (prof / 'user.js').write_text('\n'.join([
         'user_pref("gfx.webrender.software", true);', 'user_pref("layers.acceleration.disabled", true);',
@@ -267,20 +290,28 @@ def scenario_firefox(h: Harness) -> None:
         'user_pref("datareporting.policy.dataSubmissionEnabled", false);',
         'user_pref("browser.aboutwelcome.enabled", false);',
         'user_pref("accessibility.force_disabled", -1);']))   # snap Firefox ignores the GNOME a11y switch
-    subprocess.Popen(['nice', '-n', '19', 'firefox', '--no-remote', '--new-instance', '--profile', str(prof),
-                      f'file://{FIX / "chat.html"}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    spawn(['nice', '-n', '19', 'firefox', '--no-remote', '--new-instance', '--profile', str(prof),
+           f'file://{FIX / "chat.html"}'])
     h.cleanups.append(lambda: h.kill_matching(str(prof)))
     xid = h.wait(lambda: next(iter(h.windows_of(h.pids_matching(str(prof)))), None), 30)
     if not h.check('firefox window appears', xid):
-        return
+        return None, set()
     pids = h.pids_matching(str(prof))
     h.wait(lambda: h.find_entry(pids, '输入框'), 15)
+    return xid, pids
+
+
+def scenario_firefox(h: Harness) -> None:
+    print('[firefox] web page with a chat textarea')
+    xid, pids = open_firefox(h, 'ff')
+    if not xid:
+        return
     h.activate(xid)
     h.check('select quote 1 (AT-SPI)', h.select_text(pids, '防止梯度爆炸的技术'))
     h.annotate(xid, 'shift+alt+q', None, '为什么不用权重衰减？')
     h.check('select quote 2 (AT-SPI)', h.select_text(pids, 'learning rate warmup'))
     h.annotate(xid, 'shift+alt+s', '1', None)
-    rows = h.db()
+    rows = sorted(h.db(), key=lambda r: r['created_at'])      # the panel lists newest first; the prompt is chronological
     if h.check('two annotations stored', len(rows) == 2, str(rows)):
         a, b = rows
         h.check('ask: type/quote/comment', (a['type_id'], a['quote'], a['comment']) ==
@@ -441,7 +472,161 @@ def _vscode_press(pids: set[int], name: str) -> None:
         Atspi.Action.do_action(b, 0)
 
 
-SCENARIOS = {'firefox': scenario_firefox, 'terminal': scenario_terminal, 'vscode': scenario_vscode}
+def overlay_rects(h: Harness) -> list[tuple[int, int, int, int]]:
+    """Screen rectangles the app's highlight layer currently paints (its X Shape), [] when not shown."""
+    d, out = xd.get(), []
+    for w in xd.root().query_tree().children:
+        try:
+            pid = w.get_full_property(xd.atom('_NET_WM_PID'), Xatom.CARDINAL)
+            if not pid or not h.app_proc or pid.value[0] != h.app_proc.pid:
+                continue
+            name = w.get_full_property(xd.atom('_NET_WM_NAME'), xd.atom('UTF8_STRING'))
+            if not name or name.value != b'Agent Notes highlights' or w.get_attributes().map_state != X.IsViewable:
+                continue
+            g, o = w.get_geometry(), w.translate_coords(xd.root(), 0, 0)
+            for r in w.shape_get_rectangles(0).rectangles:         # 0 = ShapeBounding
+                out.append((-o.x + r.x, -o.y + r.y, r.width, r.height))
+        except error.XError:
+            continue
+    d.sync()
+    return out
+
+
+def covers(paint: list, target: tuple | None) -> bool:
+    """Is the text line `target` marked: a painted rect at its horizontal middle, overlapping its height
+    (translucent fill) or right below it (underline-only style when there is no compositor)?"""
+    if target is None:
+        return False
+    x, y, w, ht = target
+    return any(px <= x + w // 2 <= px + pw and py < y + ht + 6 and py + ph > y for px, py, pw, ph in paint)
+
+
+def doc_top(pids: set[int]) -> int | None:
+    """Top edge of the web page's viewport (below the browser toolbars)."""
+    desk = Atspi.get_desktop(0)
+    for a in (desk.get_child_at_index(i) for i in range(desk.get_child_count())):
+        if a is None or a.get_process_id() not in pids:
+            continue
+        for node, _, _ in walk(a, time.monotonic() + 3):
+            if node.get_role_name() == 'document web':
+                return Atspi.Component.get_extents(node, Atspi.CoordType.SCREEN).y
+    return None
+
+
+def quote_rect(pids: set[int], quote: str) -> tuple[int, int, int, int] | None:
+    """Where the first characters of `quote` are on screen right now (one line)."""
+    desk = Atspi.get_desktop(0)
+    for a in (desk.get_child_at_index(i) for i in range(desk.get_child_count())):
+        if a is None or a.get_process_id() not in pids:
+            continue
+        for node, _, _ in walk(a, time.monotonic() + 3, prune_hidden=False):
+            try:
+                if node.get_role_name() == 'static':
+                    continue
+                s = T.get_text(node, 0, T.get_character_count(node))
+            except Exception:
+                continue
+            i = s.find(quote)
+            if i >= 0:
+                a0 = T.get_character_extents(node, i, Atspi.CoordType.SCREEN)
+                a1 = T.get_character_extents(node, i + 3, Atspi.CoordType.SCREEN)
+                return (a0.x, a0.y, a1.x + a1.width - a0.x, a0.height)
+    return None
+
+
+def scenario_highlight(h: Harness) -> None:
+    print('[highlight] highlight on the original text: follow scrolling, clip occlusion, jump back')
+    quote = '防止梯度爆炸的技术'
+    xid, pids = open_firefox(h, 'hl')
+    if not xid:
+        return
+    h.activate(xid)
+    h.check('select quote (AT-SPI)', h.select_text(pids, quote))
+    if not h.annotate(xid, 'shift+alt+e', None, None):
+        return
+    h.select_text(pids, '\u200b')          # clear the selection so it doesn't hide the highlight in screenshots
+    where = quote_rect(pids, quote)
+    painted = h.wait(lambda: covers(overlay_rects(h), where), 4)
+    h.check('highlight drawn over the quoted text', painted, f'quote at {where}, overlay {overlay_rects(h)}')
+    h.shot('highlight_initial', xid)
+
+    h.key('End', xid)                       # scroll the page: the quote leaves the viewport
+    gone = h.wait(lambda: quote_rect(pids, quote) != where and not covers(overlay_rects(h), where), 4)
+    h.check('scrolled out of view → highlight removed', gone, f'overlay {overlay_rects(h)}')
+    h.key('Home', xid)
+    back = h.wait(lambda: quote_rect(pids, quote) == where and covers(overlay_rects(h), where), 4)
+    h.check('scrolled back → highlight follows', back, f'overlay {overlay_rects(h)}')
+    top = doc_top(pids)
+    h.key('Down', xid)                      # a small scroll: the quote moves up but stays in the page viewport
+    h.pump(0.8)
+    moved = quote_rect(pids, quote)
+    if moved and top is not None and top <= moved[1] < where[1]:
+        follow = h.wait(lambda: covers(overlay_rects(h), quote_rect(pids, quote)), 4)
+        h.check('small scroll → highlight moves with the text', follow, f'quote at {moved}, overlay {overlay_rects(h)}')
+    else:
+        h.check('small scroll leaves the quote in view (test setup)', False, f'quote {where} → {moved}, viewport top {top}')
+    h.key('Down', xid)
+    h.key('Down', xid)
+    h.pump(0.8)
+    moved = quote_rect(pids, quote)
+    if moved and top is not None and moved[1] + moved[3] <= top:
+        hidden = h.wait(lambda: not covers(overlay_rects(h), quote_rect(pids, quote)), 4)
+        h.check('text under the browser toolbar → not highlighted there', hidden,
+                f'quote at {moved}, overlay {overlay_rects(h)}')
+    h.key('Home', xid)
+    h.wait(lambda: covers(overlay_rects(h), where), 4)
+
+    # another window on top of half of the quote (shown without taking focus: the user keeps working in Firefox)
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QWidget
+    cover = QWidget(None, Qt.Window)
+    cover.setAttribute(Qt.WA_ShowWithoutActivating)
+    cover.setStyleSheet('background: #333;')
+    dpr = QGuiApplication.primaryScreen().devicePixelRatio()
+    cx, cy, cw, ch = where
+    cover.setGeometry(int(cx / dpr), int((cy - 20) / dpr), int(cw / 2 / dpr), int((ch + 40) / dpr))
+    cover.show()
+    h.pump(0.8)
+    left_half = (cx, cy, cw // 2, ch)
+    right_half = (cx + cw // 2 + 4, cy, cw // 2 - 4, ch)
+    clipped = h.wait(lambda: not covers(overlay_rects(h), left_half) and covers(overlay_rects(h), right_half), 4)
+    h.check('window on top → highlight clipped to the visible part', clipped, f'overlay {overlay_rects(h)}')
+    h.shot('highlight_occluded', xid)
+    cover.close()
+    h.pump(0.3)
+
+    # jump back from the panel: scroll away, then double-click the card
+    h.key('End', xid)
+    h.wait(lambda: not covers(overlay_rects(h), where), 4)
+    panel = h.panel_xid()
+    if not h.check('panel present', panel):
+        return
+    w = xd.get().create_resource_object('window', panel)
+    o = w.translate_coords(xd.root(), 0, 0)
+    d = xd.get()
+    xtest.fake_input(d, X.MotionNotify, x=-o.x + 60, y=-o.y + 15)    # hover the bar: the panel expands
+    d.sync()
+    h.pump(0.8)
+    g = w.get_geometry()
+    o = w.translate_coords(xd.root(), 0, 0)
+    h.shot('highlight_panel', panel)
+    card_x, card_y = -o.x + g.width // 2, -o.y + int(110 * dpr)          # newest card is at the top of the list
+    xtest.fake_input(d, X.MotionNotify, x=card_x, y=card_y)
+    d.sync()
+    h.pump(0.2)
+    for _ in range(2):
+        xtest.fake_input(d, X.ButtonPress, 1)
+        xtest.fake_input(d, X.ButtonRelease, 1)
+        d.sync()
+        time.sleep(0.05)
+    shown = h.wait(lambda: (lambda r: r is not None and covers(overlay_rects(h), r))(quote_rect(pids, quote)), 5)
+    h.check('double-click card → window scrolls to the quote and highlights it', shown,
+            f'quote at {quote_rect(pids, quote)}, overlay {overlay_rects(h)}')
+    h.shot('highlight_jump', xid)
+
+
+SCENARIOS = {'firefox': scenario_firefox, 'terminal': scenario_terminal, 'vscode': scenario_vscode,
+             'highlight': scenario_highlight}
 
 
 def main() -> int:
@@ -449,12 +634,14 @@ def main() -> int:
     h = Harness()
     print('run dir:', h.run_dir)
     try:
-        h.start_app()
         for name in wanted:
             try:
+                h.start_app(name)
                 SCENARIOS[name](h)
             except Abort as e:
                 h.check(f'{name}: aborted safely', False, str(e))
+            finally:
+                h.stop_app()
     finally:
         h.close()
     failed = [r for r in h.results if not r[1]]

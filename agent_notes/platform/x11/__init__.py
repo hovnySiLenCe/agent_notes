@@ -1,6 +1,7 @@
 """Linux X11 platform: EWMH + XTest + XGrabKey, with AT-SPI for reading and focusing UI content."""
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 
@@ -15,6 +16,21 @@ TERMINAL_CLASSES = {
 
 
 class X11Platform(Platform):
+    def __init__(self):
+        self._tracker = None
+
+    def _get_tracker(self):
+        if self._tracker is None:
+            from ..atspi.tracker import Tracker
+            self._tracker = Tracker(os.getpid())
+        return self._tracker
+
+    def track(self, reqs: list[dict], focus: set[str]) -> dict:
+        return self._get_tracker().update(reqs, focus)
+
+    def reveal(self, req: dict) -> bool:
+        return self._get_tracker().reveal(req)
+
     def active_window(self) -> WindowInfo | None:
         return windows.active_window()
 
@@ -63,6 +79,18 @@ class X11Platform(Platform):
             time.sleep(0.35)
             keys.send('Return')
         return {'ok': True, 'input': focused}
+
+    def warm_up(self) -> None:
+        from ..atspi.tree import Atspi
+        desk = Atspi.get_desktop(0)
+        for i in range(desk.get_child_count()):
+            a = desk.get_child_at_index(i)
+            if a is not None:
+                a.get_process_id()
+        windows.active_window()
+
+    def compositing(self) -> bool:
+        return windows.compositing()
 
     def accessibility_enabled(self) -> bool:
         try:

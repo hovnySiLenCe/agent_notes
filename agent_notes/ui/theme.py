@@ -46,6 +46,11 @@ QToolButton:checked { color: %(accent)s; background: %(surface_hover)s; }
 QToolButton::menu-indicator { image: none; width: 0; }
 QToolButton#cardDelete { padding: 0 4px; color: %(faint)s; }
 QToolButton#cardDelete:hover { color: %(danger)s; background: transparent; }
+QToolButton#cardAction { padding: 0 4px; color: %(faint)s; }
+QToolButton#cardAction:hover { color: %(accent)s; background: transparent; }
+QLabel#locState { color: %(faint)s; font-size: 11px; }
+QLabel#locState[state="ok"] { color: %(accent)s; }
+QLabel#locState[state="missing"] { color: #F5A623; }
 QComboBox { background: %(surface)s; border: 1px solid %(border)s; border-radius: 6px; padding: 3px 8px; }
 QComboBox QAbstractItemView { background: %(bg_solid)s; border: 1px solid %(border)s; selection-background-color: %(surface_hover)s; }
 QPlainTextEdit { background: %(surface)s; border: 1px solid %(border)s; border-radius: 6px; padding: 4px 6px;

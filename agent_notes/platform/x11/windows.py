@@ -73,6 +73,16 @@ def primary_owned_by(xid: int) -> bool:
     return (owner_id & ~mask) == (xid & ~mask)
 
 
+def compositing() -> bool:
+    """Is a compositing manager running? Without one, translucent windows are painted opaque."""
+    d = xd.get()
+    try:
+        owner = d.get_selection_owner(xd.atom(f'_NET_WM_CM_S{d.get_default_screen()}'))
+    except error.XError:
+        return True
+    return bool(owner if isinstance(owner, int) else getattr(owner, 'id', 0))
+
+
 def server_time() -> int:
     """A real X server timestamp. mutter refuses _NET_ACTIVE_WINDOW requests stamped CurrentTime."""
     d = xd.get()
@@ -102,3 +112,74 @@ def wait_active(xid: int, timeout: float = 1.0) -> bool:
             return True
         time.sleep(0.04)
     return active_xid() == xid
+
+
+# ---- geometry & stacking (for clipping highlights) --------------------------------------------------------------
+Rect = tuple[int, int, int, int]      # x, y, w, h in physical screen pixels
+
+
+def _cardinals(win, name: str) -> list[int]:
+    v = _prop(win, name, Xatom.CARDINAL)
+    return [int(x) for x in v] if v is not None else []
+
+
+def client_rect(xid: int) -> Rect | None:
+    """Content area of the window on screen (excluding WM decorations and GTK client-side shadows)."""
+    w = _window(xid)
+    try:
+        g = w.get_geometry()
+        o = w.translate_coords(xd.root(), 0, 0)
+    except error.XError:
+        return None
+    x, y, wd, ht = -o.x, -o.y, g.width, g.height
+    gtk = _cardinals(w, '_GTK_FRAME_EXTENTS')         # left, right, top, bottom shadow margins inside the window
+    if len(gtk) == 4:
+        x, y, wd, ht = x + gtk[0], y + gtk[2], wd - gtk[0] - gtk[1], ht - gtk[2] - gtk[3]
+    return (x, y, wd, ht)
+
+
+def frame_rect(xid: int) -> Rect | None:
+    """Everything the window covers on screen, including server-side decorations (title bar)."""
+    r = client_rect(xid)
+    if r is None:
+        return None
+    ext = _cardinals(_window(xid), '_NET_FRAME_EXTENTS')
+    if len(ext) == 4:
+        return (r[0] - ext[0], r[1] - ext[2], r[2] + ext[0] + ext[1], r[3] + ext[2] + ext[3])
+    return r
+
+
+def is_shown(xid: int) -> bool:
+    """Mapped, not minimized, and on the current workspace."""
+    w = _window(xid)
+    try:
+        if w.get_attributes().map_state != X.IsViewable:
+            return False
+    except error.XError:
+        return False
+    state = _prop(w, '_NET_WM_STATE', Xatom.ATOM)
+    if state is not None and xd.atom('_NET_WM_STATE_HIDDEN') in list(state):
+        return False
+    desk = _cardinals(w, '_NET_WM_DESKTOP')
+    cur = _cardinals(xd.root(), '_NET_CURRENT_DESKTOP')
+    return not desk or not cur or desk[0] in (cur[0], 0xFFFFFFFF)
+
+
+def stacking() -> list[int]:
+    """Managed windows, bottom to top."""
+    v = _prop(xd.root(), '_NET_CLIENT_LIST_STACKING')
+    return [int(w) for w in v] if v is not None else client_list()
+
+
+def occluders(xid: int) -> list[Rect]:
+    """Screen areas of the windows stacked above `xid` that are currently shown."""
+    order = stacking()
+    if xid not in order:
+        return []
+    out = []
+    for w in order[order.index(xid) + 1:]:
+        if is_shown(w):
+            r = frame_rect(w)
+            if r and r[2] > 0 and r[3] > 0:
+                out.append(r)
+    return out

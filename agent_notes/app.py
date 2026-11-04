@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import sys
 
 from PySide6.QtCore import QMimeData, QObject, QTimer, QUrl, QFileSystemWatcher
@@ -11,9 +12,11 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from . import config as cfgmod
+from . import ipc
 from .core.composer import compose
 from .core.models import INPUT_NONE, SENT, Annotation
 from .core.store import Store
+from .highlight import Highlighter
 from .platform.base import WindowInfo, get_platform
 from .ui import theme
 from .ui.panel import FloatingPanel, source_label
@@ -54,10 +57,14 @@ class Controller(QObject):
             self.state['order_newest_first'] = True
             self.save_state()
         self.store.subscribe(self.panel.refresh)
+        self.highlighter = Highlighter(self)
+        self.highlighter.states_changed.connect(self.panel.update_locate_states)
+        self.store.subscribe(self.highlighter.poke)
         self._capture_ctx: dict | None = None
         self._busy = False
         self._last_external: WindowInfo | None = None
 
+        self.worker.submit(self.platform.warm_up)     # the first capture must not pay AT-SPI's cold start
         self.hotkeys = self.platform.hotkey_listener()
         self.hotkeys.triggered.connect(self.on_hotkey)
         self.hotkeys.failed.connect(lambda spec, why: self.toast.show_message(f'快捷键 {spec} 无法注册：{why}', 'warn', 4000))
@@ -67,6 +74,13 @@ class Controller(QObject):
         self._reload_timer = QTimer(self, singleShot=True, interval=400, timeout=self.reload_config)
         self._watcher.fileChanged.connect(lambda *_: self._reload_timer.start())
         self._watcher.directoryChanged.connect(lambda *_: self._reload_timer.start())
+        # inotify watches are a per-user resource that IDEs can exhaust ("No space left on device"):
+        # then fall back to checking the file's modification time.
+        self._cfg_mtime = self._config_mtime()
+        self._cfg_poll = QTimer(self, interval=2000, timeout=self._poll_config)
+        if str(cfgmod.config_path()) not in self._watcher.files():
+            log.warning('cannot watch the config file (inotify limit?); polling it instead')
+            self._cfg_poll.start()
 
         self.tray = make_tray(self)
         self.panel.refresh()
@@ -202,14 +216,24 @@ class Controller(QObject):
 
     # ---- misc -----------------------------------------------------------------------------------------------
     def goto_source(self, a: Annotation) -> None:
-        xid = a.source.get('xid')
-        if xid and self.platform.window_exists(xid):
-            self.worker.submit(self.platform.activate, xid)
-        else:
-            self.toast.show_message('来源窗口已关闭', 'warn', near=self.panel)
+        """Switch to the annotation's window, scroll its quote into view and flash the highlight."""
+        self.highlighter.jump(a)
 
     def open_config(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(cfgmod.config_path())))
+
+    @staticmethod
+    def _config_mtime() -> float:
+        try:
+            return cfgmod.config_path().stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _poll_config(self) -> None:
+        m = self._config_mtime()
+        if m != self._cfg_mtime:
+            self._cfg_mtime = m
+            self._reload_timer.start()
 
     def reload_config(self) -> None:
         path = str(cfgmod.config_path())
@@ -226,6 +250,7 @@ class Controller(QObject):
         self.panel.config_changed()
         self.popup.setWindowOpacity(self._popup_opacity())
         self.panel.refresh()
+        self.highlighter.poke()
         self.toast.show_message('配置已重新加载', 'ok', 1400, near=self.panel)
 
     def _popup_opacity(self) -> float:
@@ -238,38 +263,79 @@ class Controller(QObject):
         self.panel.show_panel()
 
     def quit(self) -> None:
+        self.highlighter.overlay.hide()
         self.hotkeys.stop()
         self.worker.shutdown()
         self.app.quit()
 
 
-def _setup_logging() -> None:
+def _setup_logging(to_stderr: bool) -> None:
     fmt = '%(asctime)s %(levelname)s %(name)s: %(message)s'
-    handlers = [logging.FileHandler(cfgmod.data_dir() / 'agent-notes.log', encoding='utf-8'),
-                logging.StreamHandler(sys.stderr)]
+    handlers: list[logging.Handler] = [logging.FileHandler(cfgmod.data_dir() / 'agent-notes.log', encoding='utf-8')]
+    if to_stderr:
+        handlers.append(logging.StreamHandler(sys.stderr))
     logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
 
 
-def run(argv: list[str]) -> int:
-    _setup_logging()
+class CommandServer(QObject):
+    """Answers the command line (see ipc.py): ping / show / quit."""
+
+    def __init__(self, ctl: 'Controller'):
+        super().__init__()
+        self.ctl = ctl
+        path = str(ipc.socket_path())
+        QLocalServer.removeServer(path)          # left behind by an instance that crashed
+        self.server = QLocalServer(self)
+        if not self.server.listen(path):
+            log.warning('command socket %s: %s', path, self.server.errorString())
+        self.server.newConnection.connect(self._accept)
+        ipc.pid_path().write_text(str(os.getpid()))
+
+    def _accept(self) -> None:
+        while self.server.hasPendingConnections():
+            conn = self.server.nextPendingConnection()
+            conn.readyRead.connect(lambda c=conn: self._read(c))
+            conn.disconnected.connect(conn.deleteLater)
+
+    def _read(self, conn: QLocalSocket) -> None:
+        if not conn.canReadLine():
+            return
+        cmd = bytes(conn.readLine()).decode(errors='replace').strip()
+        conn.write(f'ok {os.getpid()}\n'.encode())
+        conn.flush()
+        conn.disconnectFromServer()
+        if cmd == 'show':
+            self.ctl.show_from_second_instance()
+        elif cmd == 'quit':
+            log.info('quit requested from the command line')
+            QTimer.singleShot(50, self.ctl.quit)
+
+    def close(self) -> None:
+        self.server.close()
+        try:
+            if ipc.pid_path().read_text().strip() == str(os.getpid()):
+                ipc.pid_path().unlink()
+        except OSError:
+            pass
+
+
+def run(argv: list[str], log_to_stderr: bool = True) -> int:
+    """Start the GUI. The caller (__main__) has already made sure no other instance is running."""
+    _setup_logging(log_to_stderr)
     app = QApplication(argv)
     app.setApplicationName('agent-notes')
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
     theme.apply(app)
 
-    server_name = f'agent-notes-{os.getuid()}'
-    sock = QLocalSocket()
-    sock.connectToServer(server_name)
-    if sock.waitForConnected(300):     # already running: just show its panel
-        sock.write(b'show')
-        sock.waitForBytesWritten(300)
-        return 0
-    QLocalServer.removeServer(server_name)
-    server = QLocalServer()
-    server.listen(server_name)
-
     ctl = Controller(app)
-    server.newConnection.connect(lambda: (server.nextPendingConnection(), ctl.show_from_second_instance()))
-    log.info('agent-notes started')
+    server = CommandServer(ctl)
+    app.aboutToQuit.connect(server.close)
+    # SIGTERM (--stop, logout) and Ctrl+C quit cleanly; Python only runs signal handlers between bytecodes,
+    # so a timer keeps waking the interpreter while Qt's loop is idle.
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda *_: ctl.quit())
+    wake = QTimer(interval=500, timeout=lambda: None)
+    wake.start()
+    log.info('agent-notes started (pid %d)', os.getpid())
     return app.exec()

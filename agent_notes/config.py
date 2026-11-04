@@ -60,6 +60,8 @@ DEFAULTS = {
                  'idle_opacity=收起时小条的不透明度，'
                  'opacity=展开时的不透明度，取值 0.15~1',
         'popup': 'opacity=批注弹窗的不透明度，取值 0.3~1',
+        'highlight': 'enabled=在原文上画高亮（面板 ⋯ 菜单里也可临时关闭）；show: pending=高亮当前窗口里待发送的批注 / '
+                     'all=包括已发送的 / hover=只在鼠标悬停卡片或跳转时高亮',
         'fill': 'mode: fill=自动填入输入框 / copy=只复制到剪贴板；target: source=批注来源窗口 / active=按快捷键时的当前窗口；'
                 'auto_send: 填入后自动按回车发送；mark_sent: 填入后把批注标记为已发送',
     },
@@ -71,6 +73,7 @@ DEFAULTS = {
     'fill': {'mode': 'fill', 'target': 'source', 'auto_send': False, 'mark_sent': True},
     'panel': {'auto_collapse': True, 'expand_distance': 40, 'idle_opacity': 0.5, 'opacity': 0.96},
     'popup': {'opacity': 0.9},
+    'highlight': {'enabled': True, 'show': 'pending'},
 }
 
 

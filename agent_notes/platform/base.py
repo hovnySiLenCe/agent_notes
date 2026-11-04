@@ -48,7 +48,22 @@ class Platform(ABC):
         """worker: activate `target`, focus its chat input and paste (clipboard already prepared)."""
 
     @abstractmethod
+    def track(self, reqs: list[dict], focus: set[str]) -> dict:
+        """worker: current screen rectangles of annotated text (see atspi.tracker.Tracker.update)."""
+
+    @abstractmethod
+    def reveal(self, req: dict) -> bool:
+        """worker: scroll the annotated text into view in its (already activated) window."""
+
+    @abstractmethod
     def accessibility_enabled(self) -> bool: ...
+
+    def warm_up(self) -> None:
+        """worker: pay one-time setup costs (accessibility bus connection, caches) before the first capture."""
+
+    def compositing(self) -> bool:
+        """Can windows be translucent? (False: highlights must not cover the text.)"""
+        return True
 
 
 def get_platform() -> Platform:

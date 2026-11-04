@@ -22,4 +22,11 @@ if [ "$(gsettings get org.gnome.desktop.interface toolkit-accessibility 2>/dev/n
     echo "  gsettings set org.gnome.desktop.interface toolkit-accessibility true" >&2
     echo "  （开启后需重启浏览器 / VS Code）" >&2
 fi
-echo "完成。启动：./run.sh"
+if [ "${1:-}" = "--test" ] && ! command -v Xvfb >/dev/null && [ ! -x .venv/syslibs/bin/Xvfb ]; then
+    # Xvfb for the invisible end-to-end test sandbox (tests/e2e/sandbox.py); unpacked locally, no sudo.
+    mkdir -p .venv/syslibs/bin
+    (cd .venv/syslibs && apt download xvfb >/dev/null && dpkg -x xvfb_*.deb xvfb-root \
+        && cp xvfb-root/usr/bin/Xvfb bin/)
+    echo "已在本地解压 Xvfb（.venv/syslibs/bin），可运行沙箱端到端测试"
+fi
+echo "完成。启动：./run.sh（后台运行；./run.sh --help 查看命令）"
