@@ -63,6 +63,7 @@ class Controller(QObject):
         self._capture_ctx: dict | None = None
         self._busy = False
         self._last_external: WindowInfo | None = None
+        self._hinted: set[str] = set()                    # apps already told how to enable accessibility
 
         self.worker.submit(self.platform.warm_up)     # the first capture must not pay AT-SPI's cold start
         self.hotkeys = self.platform.hotkey_listener()
@@ -142,12 +143,45 @@ class Controller(QObject):
         ctx, self._capture_ctx = self._capture_ctx, None
         if ctx is None:
             return
-        self.store.add(Annotation(type_id=type_id, quote=ctx['quote'], comment=comment,
-                                  anchor=ctx['anchor'], source=ctx['source']))
+        a = self.store.add(Annotation(type_id=type_id, quote=ctx['quote'], comment=comment,
+                                      anchor=ctx['anchor'], source=ctx['source']))
         name = self.cfg.type_map[type_id].name if type_id in self.cfg.type_map else type_id
         self.panel.reveal()
         self.toast.show_message(f'已添加批注 · {name}', 'ok', 1400, near=self.panel)
         self.worker.submit(self.platform.activate, ctx['win'].xid)   # hand focus back to where the user was
+        if a.anchor.get('method') != 'atspi' and a.quote.strip():
+            self.worker.submit(self._late_anchor, ctx['win'], a.quote,
+                               cb=lambda res, ann_id=a.id, win=ctx['win']: self._on_late_anchor(ann_id, win, res))
+
+    def _late_anchor(self, win: WindowInfo, quote: str):
+        """worker: the app gave us only plain text; find it in the window's tree so highlights still work."""
+        if not self.platform.app_accessible(win):
+            return 'inaccessible'
+        return self.platform.anchor_from_text(win, quote)
+
+    def _on_late_anchor(self, ann_id: str, win: WindowInfo, res) -> None:
+        if isinstance(res, dict):
+            log.info('anchored plain-text capture by searching the tree: %s', res.get('role'))
+            if self.store.get(ann_id) is not None:
+                self.store.update(ann_id, anchor=res)
+        elif res == 'inaccessible':
+            self._accessibility_hint(win)
+        else:
+            log.info('plain-text capture not found in the tree of %s', win.wm_class)
+
+    def _accessibility_hint(self, win: WindowInfo) -> None:
+        """Once per app and session: say why there is no highlight and how to turn the app's accessibility on."""
+        cls = win.wm_class.lower()
+        if cls in self._hinted:
+            return
+        self._hinted.add(cls)
+        if 'firefox' in cls:
+            how = 'Firefox 关闭了无障碍接口。运行 ./run.sh --setup-firefox，然后重启 Firefox。'
+        elif cls in ('code', 'cursor', 'google-chrome', 'chromium', 'chromium-browser', 'microsoft-edge', 'brave-browser'):
+            how = f'{source_label({"wm_class": win.wm_class})} 未开启无障碍接口：启动参数加 --force-renderer-accessibility。'
+        else:
+            how = f'{source_label({"wm_class": win.wm_class})} 没有提供无障碍接口。'
+        self.toast.show_message(f'这条批注无法在原文上高亮：{how}', 'warn', 7000, near=self.panel)
 
     def _on_popup_cancelled(self) -> None:
         ctx, self._capture_ctx = self._capture_ctx, None

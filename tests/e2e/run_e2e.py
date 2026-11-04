@@ -550,6 +550,22 @@ def scenario_highlight(h: Harness) -> None:
     h.check('highlight drawn over the quoted text', painted, f'quote at {where}, overlay {overlay_rects(h)}')
     h.shot('highlight_initial', xid)
 
+    # plain-text captures (apps that don't report selection offsets) get an anchor by searching the tree
+    from agent_notes.platform.atspi.locate import anchor_from_text
+    from agent_notes.platform.atspi.tracker import Tracker
+    pid = next(iter(p for p in pids if any(windows.info(w) and windows.info(w).pid == p for w in [xid])), None)
+    plain = '把梯度的范数限制在\n某个阈值以内'              # as copied from the page: line break where it wrapped
+    anchor = anchor_from_text(pid, xid, plain)
+    h.check('plain-text quote anchored by searching the tree', anchor is not None and anchor.get('path') is not None,
+            str(anchor))
+    if anchor:
+        res = Tracker(os.getpid()).update([{'id': 'p', 'xid': xid, 'pid': pid, 'anchor': anchor, 'quote': plain}],
+                                          {'p'})
+        item = res['items'].get('p', {})
+        target = quote_rect(pids, '范数限制在')             # (the quote wraps after 把: test a part on line 2)
+        h.check('…and the tracker measures it on screen', item.get('state') == 'ok' and covers(item['rects'], target),
+                f'{item} vs {target}')
+
     h.key('End', xid)                       # scroll the page: the quote leaves the viewport
     gone = h.wait(lambda: quote_rect(pids, quote) != where and not covers(overlay_rects(h), where), 4)
     h.check('scrolled out of view → highlight removed', gone, f'overlay {overlay_rects(h)}')

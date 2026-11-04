@@ -158,6 +158,10 @@ def _search(nodes: list, anchor: dict, quote: str, path: tuple) -> list[Segment]
                 best = (key, node, hit, text)
     if best is not None:
         _, node, (s, e, _), text = best
+        try:
+            terminal = terminal or node.get_role_name() == 'terminal'
+        except Exception:
+            pass
         return [Segment(node, s, e, text[s:e], terminal)]
     ps = parts(quote)
     if len(ps) < 2:
@@ -192,3 +196,36 @@ def scroll_into_view(seg: Segment) -> bool:
         return bool(Atspi.Component.scroll_to(seg.node, Atspi.ScrollType.ANYWHERE))
     except Exception:
         return False
+
+
+def anchor_from_text(pid: int | None, xid: int, quote: str, budget: float = 1.0) -> dict | None:
+    """An anchor for a quote that was captured as plain text (the app didn't report its selection offsets):
+    find the text in the window's tree. Shown (visible) parts of the window are searched first."""
+    if not quote.strip():
+        return None
+    frames = frames_for(pid, xid)
+    if not frames:
+        return None
+    deadline = time.monotonic() + budget
+    nodes = []
+    for node, path, _ in walk(frames[0], deadline):
+        text = _text(node)
+        if text and text.replace(OBJ, '').strip():
+            nodes.append((node, path, text))
+    segs = _search(nodes, {}, quote, ())
+    if not segs:
+        return None
+    paths = {id(n): (p, t) for n, p, t in nodes}
+    (p0, t0), (p1, t1) = paths[id(segs[0].node)], paths[id(segs[-1].node)]
+    s, e = segs[0].start, segs[-1].end
+    try:
+        role = segs[0].node.get_role_name()
+    except Exception:
+        role = ''
+    return {'method': 'atspi', 'located_by': 'text', 'path': list(p0), 'start': s, 'end_path': list(p1), 'end': e,
+            'prefix': t0[max(0, s - 40):s].replace(OBJ, ''), 'suffix': t1[e:e + 40].replace(OBJ, ''), 'role': role}
+
+
+def app_accessible(pid: int | None) -> bool:
+    """Does the app expose an accessibility tree at all?"""
+    return bool(pid) and find_app(pid) is not None

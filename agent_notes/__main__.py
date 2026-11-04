@@ -30,6 +30,8 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     g.add_argument('--restart', action='store_true', help='重启（加载新代码）')
     g.add_argument('--status', action='store_true', help='查看是否在运行')
     g.add_argument('--autostart', choices=('on', 'off'), help='登录桌面时自动启动')
+    g.add_argument('--setup-firefox', action='store_true',
+                   help='为 Firefox 打开无障碍接口（写入各配置目录的 user.js，重启 Firefox 后生效），用于精确定位与高亮')
     p.add_argument('--detached', action='store_true', help=argparse.SUPPRESS)   # the background child
     return p.parse_args(argv)
 
@@ -97,6 +99,31 @@ def _autostart(on: bool) -> int:
     return 0
 
 
+FIREFOX_PREF = 'user_pref("accessibility.force_disabled", -1);'
+FIREFOX_ROOTS = ('snap/firefox/common/.mozilla/firefox', '.mozilla/firefox')
+
+
+def firefox_profiles(home: Path | None = None) -> list[Path]:
+    home = home or Path.home()
+    return sorted({p.parent for root in FIREFOX_ROOTS for p in (home / root).glob('*/prefs.js')})
+
+
+def setup_firefox(home: Path | None = None) -> int:
+    """Snap Firefox ignores the desktop accessibility switch; this pref turns it on (user.js is applied at start)."""
+    profiles = firefox_profiles(home)
+    if not profiles:
+        print('没有找到 Firefox 配置目录。也可以手动：about:config → accessibility.force_disabled 设为 -1，然后重启 Firefox。')
+        return 1
+    for prof in profiles:
+        uj = prof / 'user.js'
+        lines = uj.read_text(encoding='utf-8').splitlines() if uj.exists() else []
+        lines = [ln for ln in lines if 'accessibility.force_disabled' not in ln] + [FIREFOX_PREF]
+        uj.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        print(f'已写入 {uj}')
+    print('请完全退出并重新打开 Firefox 后生效。撤销：删除上述 user.js 中这一行，并在 about:config 里重置该项。')
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse(sys.argv[1:] if argv is None else argv)
     from . import ipc
@@ -110,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if args.autostart:
         return _autostart(args.autostart == 'on')
+    if args.setup_firefox:
+        return setup_firefox()
     if args.restart and not _stop():
         print('无法结束旧实例，请手动 kill。', file=sys.stderr)
         return 1

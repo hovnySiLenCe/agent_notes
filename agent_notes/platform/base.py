@@ -58,6 +58,14 @@ class Platform(ABC):
     @abstractmethod
     def accessibility_enabled(self) -> bool: ...
 
+    def anchor_from_text(self, win: WindowInfo, quote: str) -> dict | None:
+        """worker: find a plain-text quote in `win` and return an anchor for it (None if not found)."""
+        return None
+
+    def app_accessible(self, win: WindowInfo) -> bool:
+        """worker: does the window's application expose an accessibility tree?"""
+        return True
+
     def warm_up(self) -> None:
         """worker: pay one-time setup costs (accessibility bus connection, caches) before the first capture."""
 

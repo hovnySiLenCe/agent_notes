@@ -10,15 +10,16 @@ from __future__ import annotations
 OBJ = '￼'
 
 
-def normalize(text: str) -> tuple[str, list[int]]:
-    """(normalized text, index map): out[i] came from text[idx[i]]. idx has one extra entry = len(text)."""
+def normalize(text: str, drop_space: bool = False) -> tuple[str, list[int]]:
+    """(normalized text, index map): out[i] came from text[idx[i]]. idx has one extra entry = len(text).
+    drop_space removes whitespace entirely (CJK text wraps without spaces, but copies may contain newlines)."""
     out: list[str] = []
     idx: list[int] = []
     for i, ch in enumerate(text):
         if ch == OBJ:
             continue
         if ch.isspace():
-            if out and out[-1] == ' ':
+            if drop_space or (out and out[-1] == ' '):
                 continue
             ch = ' '
         out.append(ch)
@@ -42,16 +43,20 @@ def _common_prefix(a: str, b: str) -> int:
 
 
 def find_all(text: str, quote: str) -> list[tuple[int, int]]:
-    """Every occurrence of `quote` in `text` as (start, end) offsets into the original text."""
-    nq = normalize(quote)[0].strip()
-    if not nq:
-        return []
-    nt, idx = normalize(text)
-    hits, i = [], nt.find(nq)
-    while i >= 0:
-        hits.append((idx[i], idx[i + len(nq) - 1] + 1))
-        i = nt.find(nq, i + 1)
-    return hits
+    """Every occurrence of `quote` in `text` as (start, end) offsets into the original text.
+    Whitespace runs match each other; if that finds nothing, whitespace is ignored altogether."""
+    for drop in (False, True):
+        nq = normalize(quote, drop)[0].strip()
+        if not nq:
+            return []
+        nt, idx = normalize(text, drop)
+        hits, i = [], nt.find(nq)
+        while i >= 0:
+            hits.append((idx[i], idx[i + len(nq) - 1] + 1))
+            i = nt.find(nq, i + 1)
+        if hits:
+            return hits
+    return []
 
 
 def score(text: str, start: int, end: int, prefix: str = '', suffix: str = '') -> int:

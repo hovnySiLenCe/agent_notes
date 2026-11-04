@@ -15,6 +15,11 @@ class AnchorTest(unittest.TestCase):
         (s, e), = find_all(text, '是一种 防止梯度爆炸')
         self.assertEqual(text[s:e], '是一种\n  防止梯度爆炸')
 
+    def test_line_breaks_inside_cjk_text(self):
+        text = '把梯度的范数限制在某个阈值以内。'
+        (s, e), = find_all(text, '把梯度的范数限制在\n某个阈值')
+        self.assertEqual(text[s:e], '把梯度的范数限制在某个阈值')
+
     def test_context_picks_the_right_occurrence(self):
         text = 'A: learning rate warmup is good. B: learning rate warmup is bad.'
         s, e, _ = find_quote(text, 'learning rate warmup', prefix='B: ', suffix=' is bad')

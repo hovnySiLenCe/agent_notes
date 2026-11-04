@@ -17,6 +17,7 @@
 | `./run.sh --stop` / `--restart` | 停止 / 重启（更新代码后用 `--restart`） |
 | `./run.sh -f` | 在当前终端前台运行，日志直接输出，`Ctrl+C` 退出 |
 | `./run.sh --autostart on\|off` | 登录桌面时自动启动（写入 `~/.config/autostart/agent-notes.desktop`） |
+| `./run.sh --setup-firefox` | 为 Firefox 打开无障碍接口（重启 Firefox 后生效），用于精确定位与高亮 |
 
 后台运行的输出在 `~/.local/share/agent-notes/agent-notes.out`，日志在同目录 `agent-notes.log`。
 
@@ -26,7 +27,10 @@
 gsettings set org.gnome.desktop.interface toolkit-accessibility true
 ```
 
-snap 版 Firefox 不跟随该开关，需在 `about:config` 把 `accessibility.force_disabled` 设为 `-1`。
+snap 版 Firefox 不跟随该开关：运行 `./run.sh --setup-firefox`（在各 Firefox 配置目录的 `user.js` 写入
+`accessibility.force_disabled = -1`），然后**完全退出并重开 Firefox**；也可在 `about:config` 手动改。
+Chrome / Chromium / VS Code 等 Electron 应用若没有开启，可在启动参数加 `--force-renderer-accessibility`。
+某个应用没开无障碍接口时，第一次在其中添加批注会弹出提示告诉你怎么开。
 
 ## 使用
 
@@ -53,7 +57,8 @@ snap 版 Firefox 不跟随该开关，需在 `about:config` 把 `accessibility.f
 - **双击卡片**或点卡片上的 ⌖：切到来源窗口，把原文滚动到可见处并闪烁高亮。
 - 卡片上的小标记：◉ 原文可见 / ○ 已滚出视野 / ⚠ 原文找不到（页面关了或内容变了）。
 - 面板 ⋯ 菜单可临时关闭高亮。没有窗口合成器（compositor）时只画下划线，不遮挡文字。
-- 定位依赖无障碍接口：通过剪贴板兜底采集（无精确锚点）的批注没有高亮，双击只切换窗口。
+- 定位依赖无障碍接口。应用没有报告选区位置、只拿到了选中的文字时，会在该窗口的无障碍树里按文字查找原文来补上锚点
+  （忽略换行/空白差异）；应用完全没有无障碍接口时没有高亮，双击只切换窗口。
 
 填入方式：普通应用用剪贴板 + `Ctrl+V`（先用无障碍接口找到并聚焦聊天输入框），终端用 PRIMARY + `Shift+Insert`；
 完成后恢复原剪贴板。默认**不自动发送**。若无法切换到目标窗口，内容留在剪贴板并提示手动粘贴。
@@ -124,5 +129,5 @@ spike/         M0 可行性验证脚本与结论（FINDINGS.md）
 - [x] M0 可行性验证
 - [x] M1 快捷键、选区采集（含锚点）、批注弹窗、悬浮面板、存储、拼装、自动填入、自定义类型
 - [x] M2 原文高亮层（透明置顶覆盖层）、滚动跟随、遮挡裁剪、点击批注跳回原文；后台运行与 `--status/--stop/--restart/--autostart`
-- [ ] M3 OCR 兜底、类型/模板图形化设置、划词气泡、状态流转（已解决）
+- [ ] M3 采集增强（✅ 纯文字采集按文字补锚点、✅ 无障碍未开启提示与 `--setup-firefox`、OCR 兜底）、类型/模板图形化设置、划词气泡、状态流转（已解决）
 - [ ] M4 AppImage 打包；Windows（UIA）/ macOS（AX）移植

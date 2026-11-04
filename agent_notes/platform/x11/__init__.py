@@ -80,6 +80,14 @@ class X11Platform(Platform):
             keys.send('Return')
         return {'ok': True, 'input': focused}
 
+    def anchor_from_text(self, win: WindowInfo, quote: str) -> dict | None:
+        from ..atspi.locate import anchor_from_text
+        return anchor_from_text(win.pid, win.xid, quote)
+
+    def app_accessible(self, win: WindowInfo) -> bool:
+        from ..atspi.locate import app_accessible
+        return app_accessible(win.pid)
+
     def warm_up(self) -> None:
         from ..atspi.tree import Atspi
         desk = Atspi.get_desktop(0)
