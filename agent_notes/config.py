@@ -31,32 +31,39 @@ def config_path() -> Path:
     return config_dir() / 'config.json'
 
 
-DEFAULT_TYPES = [
-    {'id': 'expand', 'name': '展开', 'color': '#4C8BF5', 'hotkey': 'Shift+Alt+E', 'input': 'optional',
-     'template': '【展开】{{#quote}}「{{quote}}」{{/quote}}→ 请更详细地解释这部分{{#comment}}，重点：{{comment}}{{/comment}}'},
-    {'id': 'condense', 'name': '精简', 'color': '#22A06B', 'hotkey': 'Shift+Alt+W', 'input': 'optional',
-     'template': '【精简】{{#quote}}「{{quote}}」{{/quote}}→ 这部分请压缩精简{{#comment}}，{{comment}}{{/comment}}'},
+DEFAULT_TYPES = [   # the menu shows 4 per row; order = keys 1-9, 0
+    # row 1 in the menu (and the selection bubble): react to what the agent said
+    {'id': 'agree', 'name': '同意', 'color': '#16A34A', 'hotkey': 'Shift+Alt+Y', 'input': 'optional',
+     'template': '【同意】{{#quote}}「{{quote}}」{{/quote}}→ 同意这一点，按这个思路继续{{#comment}}（{{comment}}）{{/comment}}'},
+    {'id': 'disagree', 'name': '不同意', 'color': '#C2185B', 'hotkey': 'Shift+Alt+N', 'input': 'optional',
+     'template': '【不同意】{{#quote}}「{{quote}}」{{/quote}}→ 我不同意这一点{{#comment}}：{{comment}}{{/comment}}，请重新考虑'},
     {'id': 'ask', 'name': '追问', 'color': '#F5A623', 'hotkey': 'Shift+Alt+Q', 'input': 'required',
      'template': '【追问】{{#quote}}「{{quote}}」{{/quote}}→ {{comment}}'},
     {'id': 'fix', 'name': '纠错', 'color': '#E5484D', 'hotkey': '', 'input': 'optional',
      'template': '【纠错】{{#quote}}「{{quote}}」{{/quote}}→ 这里可能有误{{#comment}}：{{comment}}{{/comment}}，请核实并修正'},
+    # row 2: ask for a rewrite
+    {'id': 'expand', 'name': '展开', 'color': '#4C8BF5', 'hotkey': 'Shift+Alt+E', 'input': 'optional',
+     'template': '【展开】{{#quote}}「{{quote}}」{{/quote}}→ 请更详细地解释这部分{{#comment}}，重点：{{comment}}{{/comment}}'},
+    {'id': 'condense', 'name': '精简', 'color': '#6366F1', 'hotkey': 'Shift+Alt+W', 'input': 'optional',
+     'template': '【精简】{{#quote}}「{{quote}}」{{/quote}}→ 这部分请压缩精简{{#comment}}，{{comment}}{{/comment}}'},
     {'id': 'example', 'name': '换个例子', 'color': '#8E4EC6', 'hotkey': '', 'input': 'optional',
      'template': '【换个例子】{{#quote}}「{{quote}}」{{/quote}}→ 请换一个更贴切的例子{{#comment}}（{{comment}}）{{/comment}}'},
     {'id': 'code', 'name': '给出代码', 'color': '#0EA5A4', 'hotkey': '', 'input': 'optional',
      'template': '【给出代码】{{#quote}}「{{quote}}」{{/quote}}→ 请给出对应的代码示例{{#comment}}，要求：{{comment}}{{/comment}}'},
-    {'id': 'keep', 'name': '保留', 'color': '#7C8594', 'hotkey': '', 'input': 'optional',
-     'template': '【保留】{{#quote}}「{{quote}}」{{/quote}}→ 这部分很好，修改时请保留{{#comment}}（{{comment}}）{{/comment}}'},
+    # row 3: keep / drop
     {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'optional',
      'template': '【忽略】{{#quote}}「{{quote}}」{{/quote}}→ 这部分不用管，后续回复中不必再处理或提及{{#comment}}（{{comment}}）{{/comment}}'},
-    {'id': 'solved', 'name': '已解决', 'color': '#3FB27F', 'hotkey': '', 'input': 'optional',
+    {'id': 'solved', 'name': '已解决', 'color': '#64748B', 'hotkey': '', 'input': 'optional',
      'template': '【已解决】{{#quote}}「{{quote}}」{{/quote}}→ 这个问题已经解决了，不用再处理{{#comment}}（{{comment}}）{{/comment}}'},
+    {'id': 'keep', 'name': '保留', 'color': '#84A63A', 'hotkey': '', 'input': 'optional',
+     'template': '【保留】{{#quote}}「{{quote}}」{{/quote}}→ 这部分很好，修改时请保留{{#comment}}（{{comment}}）{{/comment}}'},
 ]
 
 DEFAULTS = {
     '_说明': {
         'hotkeys': '全局快捷键：menu=批注菜单, fill=填入（带提示语和类型说明）, fill_plain=仅填入引用和批注, '
                    'toggle_panel=显示/隐藏面板；格式如 Shift+Alt+S，留空表示不绑定',
-        'types': '批注类型（最多前 9 个会出现在菜单里，按数字键选择）。input: none=直接保存 / optional=可选说明 / required=必须输入；'
+        'types': '批注类型（菜单每行 4 个，按 1-9、0 选前 10 个，其余用方向键）。input: none=直接保存 / optional=可选说明 / required=必须输入；'
                  'template 变量：{{quote}} {{comment}} {{name}}，{{#comment}}…{{/comment}} 表示有说明时才输出',
         'prompt': '拼装 prompt 的开头/结尾；quote_max_chars 为引用原文的最大长度（超出时省略中间）；'
                   'plain_template 为 fill_plain 时每条批注的格式',

@@ -310,7 +310,7 @@ def scenario_firefox(h: Harness) -> None:
     h.check('select quote 1 (AT-SPI)', h.select_text(pids, '防止梯度爆炸的技术'))
     h.annotate(xid, 'shift+alt+q', None, '为什么不用权重衰减？')
     h.check('select quote 2 (AT-SPI)', h.select_text(pids, 'learning rate warmup'))
-    h.annotate(xid, 'shift+alt+s', '1', None)
+    h.annotate(xid, 'shift+alt+s', '5', None)                       # row 2, first: 展开
     rows = sorted(h.db(), key=lambda r: r['created_at'])      # the panel lists newest first; the prompt is chronological
     if h.check('two annotations stored', len(rows) == 2, str(rows)):
         a, b = rows
@@ -321,7 +321,7 @@ def scenario_firefox(h: Harness) -> None:
                 and a['anchor'].get('suffix', '').startswith('。'), str(a['anchor']))
         h.check('ask: source window recorded', a['source'].get('xid') == xid and a['source'].get('wm_class'),
                 str(a['source']))
-        h.check('menu + digit 1 → expand', (b['type_id'], b['quote']) == ('expand', 'learning rate warmup'), str(b))
+        h.check('menu + digit 5 → expand', (b['type_id'], b['quote']) == ('expand', 'learning rate warmup'), str(b))
     panel = h.panel_xid()
     if panel:
         h.shot('firefox_panel', panel)
@@ -514,7 +514,8 @@ def doc_top(pids: set[int]) -> int | None:
 
 
 def quote_rect(pids: set[int], quote: str) -> tuple[int, int, int, int] | None:
-    """Where the first characters of `quote` are on screen right now (one line)."""
+    """Where the first characters of `quote` are on screen right now (one line); None while Firefox still reports
+    empty extents (right after a selection change)."""
     desk = Atspi.get_desktop(0)
     for a in (desk.get_child_at_index(i) for i in range(desk.get_child_count())):
         if a is None or a.get_process_id() not in pids:
@@ -530,6 +531,8 @@ def quote_rect(pids: set[int], quote: str) -> tuple[int, int, int, int] | None:
             if i >= 0:
                 a0 = T.get_character_extents(node, i, Atspi.CoordType.SCREEN)
                 a1 = T.get_character_extents(node, i + 3, Atspi.CoordType.SCREEN)
+                if a0.height <= 0:
+                    return None
                 return (a0.x, a0.y, a1.x + a1.width - a0.x, a0.height)
     return None
 
@@ -545,7 +548,7 @@ def scenario_highlight(h: Harness) -> None:
     if not h.annotate(xid, 'shift+alt+e', None, None):
         return
     h.select_text(pids, '\u200b')          # clear the selection so it doesn't hide the highlight in screenshots
-    where = quote_rect(pids, quote)
+    where = h.wait(lambda: quote_rect(pids, quote), 3)
     painted = h.wait(lambda: covers(overlay_rects(h), where), 4)
     h.check('highlight drawn over the quoted text', painted, f'quote at {where}, overlay {overlay_rects(h)}')
     h.shot('highlight_initial', xid)
@@ -704,7 +707,7 @@ def scenario_bubble(h: Harness) -> None:
         return
     before = len(h.db())
     h.ensure_active(xid)
-    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: 展开 (expand)
+    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: 同意 (agree)
     popup = h.wait(h.app_active, 4)
     if not h.check('click a type → popup opens', popup):
         return
@@ -714,8 +717,8 @@ def scenario_bubble(h: Harness) -> None:
     rows = sorted(h.db(), key=lambda r: r['created_at'])
     if h.check('annotation saved from the bubble', saved and rows):
         r = rows[-1]
-        h.check('bubble: type expand, the mouse-selected quote, AT-SPI anchor',
-                r['type_id'] == 'expand' and '梯度爆炸' in r['quote'] and r['anchor'].get('method') == 'atspi', str(r))
+        h.check('bubble: type agree, the mouse-selected quote, AT-SPI anchor',
+                r['type_id'] == 'agree' and '梯度爆炸' in r['quote'] and r['anchor'].get('method') == 'atspi', str(r))
 
 
 SCENARIOS = {'firefox': scenario_firefox, 'terminal': scenario_terminal, 'vscode': scenario_vscode,

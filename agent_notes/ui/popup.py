@@ -1,6 +1,6 @@
 """The small window that pops up at the cursor to pick an annotation type and type a comment.
 
-Two stages: 'type' (digits 1-9 / arrows / Enter pick a type) and 'comment' (Enter saves, Shift+Enter newline,
+Two stages: 'type' (digits 1-9, 0 / arrows / Enter pick a type) and 'comment' (Enter saves, Shift+Enter newline,
 Tab goes back to types). Esc or clicking elsewhere cancels.
 """
 from __future__ import annotations
@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QLabel, QPlainTextEdit, QPus
 from ..core.models import INPUT_NONE, INPUT_REQUIRED, AnnoType
 from .theme import chip_style
 
-MAX_TYPES = 9
+MAX_TYPES = 12
+KEYS = '1234567890'        # type i is picked with KEYS[i]; later ones with the arrows
 CHIPS_PER_ROW = 4
 
 
@@ -109,7 +110,7 @@ class AnnotatePopup(QWidget):
             b.deleteLater()
         self._buttons = []
         for i, t in enumerate(self._types):
-            b = QPushButton(f'{i + 1}  {t.name}')
+            b = QPushButton(f'{KEYS[i]}  {t.name}' if i < len(KEYS) else t.name)
             b.setFocusPolicy(Qt.NoFocus)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, tid=t.id: self._choose(tid))
@@ -131,7 +132,7 @@ class AnnotatePopup(QWidget):
             self._input.setPlaceholderText(f'输入{t.name}内容…' if required else f'{t.name}：补充说明（可选）')
             self._hint.setText('Enter 保存 · Shift+Enter 换行 · Tab 换类型 · Esc 取消')
         else:
-            self._hint.setText('按 1-9 或 ←→ + Enter 选择类型 · Esc 取消')
+            self._hint.setText(f'按 1-{KEYS[min(len(self._types), len(KEYS)) - 1]} 或 ←→ + Enter 选择类型 · Esc 取消')
         self._fit()
 
     def _fit(self) -> None:
@@ -186,8 +187,9 @@ class AnnotatePopup(QWidget):
         if k == Qt.Key_Escape:
             return self._cancel()
         if self._stage == 'type' and self._types:
-            if Qt.Key_1 <= k <= Qt.Key_9 and k - Qt.Key_1 < len(self._types):
-                return self._choose(self._types[k - Qt.Key_1].id)
+            i = KEYS.find(e.text()) if e.text() else -1
+            if 0 <= i < len(self._types):
+                return self._choose(self._types[i].id)
             if k in (Qt.Key_Right, Qt.Key_Down, Qt.Key_Tab):
                 self._cursor = (self._cursor + 1) % len(self._types)
                 return self._refresh()

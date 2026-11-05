@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-FAST_MS = 120          # while things are moving (scrolling)
-SLOW_MS = 400          # while nothing changes
+FAST_MS = 33           # while things are moving (scrolling): ~30 fps; a tick that moved costs ~20 ms
+SLOW_MS = 150          # while nothing changes (a tick that finds nothing moved costs ~1 ms)
+MOVING_S = 1.2         # keep polling fast this long after the last movement / wheel turn
 IDLE_MS = 1000         # nothing to track
 FLASH_S = 2.5          # how long a jumped-to annotation stays emphasized
 SHOW_MODES = ('pending', 'all', 'hover')
@@ -41,6 +42,7 @@ class Highlighter(QObject):
         self._flash: dict[str, float] = {}       # ann id -> monotonic deadline
         self.states: dict[str, str] = {}         # ann id -> ok | offscreen | missing | hidden
         self._inflight = False
+        self._moving_until = 0.0
         self._last_marks: tuple = ()
         self._timer = QTimer(self, singleShot=True, timeout=self.tick)
         self._timer.start(SLOW_MS)
@@ -61,6 +63,9 @@ class Highlighter(QObject):
         self.ctl.save_state()
         if not on:
             self.overlay.set_marks([])
+        sync = getattr(self.ctl, '_sync_watcher', None)      # the wheel listener runs only when someone needs it
+        if sync:
+            sync()
         self.poke()
 
     def show_mode(self) -> str:
@@ -80,6 +85,12 @@ class Highlighter(QObject):
     def poke(self) -> None:
         """Re-measure soon (after a hover change, a jump, a store change …)."""
         self._timer.start(0)
+
+    def scrolled(self) -> None:
+        """The mouse wheel turned somewhere: content is about to move, track it closely from now on."""
+        self._moving_until = time.monotonic() + MOVING_S
+        if not self._inflight:
+            self._timer.start(0)
 
     def focus_ids(self) -> set[str]:
         now = time.monotonic()
@@ -125,8 +136,10 @@ class Highlighter(QObject):
         if isinstance(res, Exception) or not isinstance(res, dict):
             self._timer.start(IDLE_MS)
             return
-        moved = self.apply(res)
-        self._timer.start(FAST_MS if moved or self.focus_ids() else SLOW_MS)
+        now = time.monotonic()
+        if self.apply(res):
+            self._moving_until = now + MOVING_S
+        self._timer.start(FAST_MS if now < self._moving_until or self.focus_ids() else SLOW_MS)
 
     # ---- painting -------------------------------------------------------------------------------------------
     def _own_windows(self) -> QRegion:

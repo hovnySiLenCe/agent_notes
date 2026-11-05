@@ -117,6 +117,18 @@ class HighlighterTest(unittest.TestCase):
         self.assertEqual(len(self.ctl.worker.calls), 1)
         self.assertEqual(self.hl.overlay.geometry().adjusted(3, 3, -3, -3), QRect(100, 100, 200, 20))
 
+    def test_wheel_switches_to_fast_polling(self):
+        from agent_notes import highlight
+        self.track_result = self.result({self.a.id: {'state': 'ok', 'rects': [(100, 100, 200, 20)]}})
+        self.hl.tick()                                   # first paint counts as movement
+        self.hl.tick()                                   # unchanged picture
+        self.hl._moving_until = 0.0
+        self.hl.tick()
+        self.assertEqual(self.hl._timer.interval(), highlight.SLOW_MS)
+        self.hl.scrolled()
+        self.hl.tick()
+        self.assertEqual(self.hl._timer.interval(), highlight.FAST_MS)
+
     def test_jump_flashes_or_reports_missing(self):
         self.hl.jump(self.a)
         self.assertIn(self.a.id, self.hl.focus_ids())

@@ -71,6 +71,7 @@ class Controller(QObject):
         if self.selwatch is not None:
             self.selwatch.selected.connect(self._on_text_selected)
             self.selwatch.pressed.connect(self._on_pointer_pressed)
+            self.selwatch.scrolled.connect(self.highlighter.scrolled)
         self._sync_bubble()
 
         self.worker.submit(self.platform.warm_up)     # the first capture must not pay AT-SPI's cold start
@@ -130,13 +131,18 @@ class Controller(QObject):
         n = max(0, min(9, int(conf.get('types', 4))))
         self.bubble.set_types(self.cfg.types[:n], {**{t.id: t.hotkey for t in self.cfg.types}, '': hk.get('menu', '')})
         self.bubble.timeout_ms = max(800, int(conf.get('timeout_ms', 3500)))
+        if not self.bubble_enabled():
+            self.bubble.hide()
+        self._sync_watcher()
+
+    def _sync_watcher(self) -> None:
+        """The mouse watcher serves the bubble (selections) and the highlights (wheel turns)."""
         if self.selwatch is None:
             return
-        if self.bubble_enabled():
+        if self.bubble_enabled() or self.highlighter.enabled():
             self.selwatch.start()
         else:
             self.selwatch.stop()
-            self.bubble.hide()
 
     def _on_text_selected(self) -> None:
         if not self.bubble_enabled() or self._busy or self.popup.isVisible():
