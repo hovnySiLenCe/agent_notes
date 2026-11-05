@@ -678,7 +678,7 @@ def click(x: int, y: int) -> None:
 
 
 def scenario_bubble(h: Harness) -> None:
-    print('[bubble] select with the mouse → type buttons next to the pointer → click one → popup → saved')
+    print('[bubble] select with the mouse → type buttons next to the pointer → simple tag saved / ⋯ → popup')
     quote = '防止梯度爆炸的技术'
     xid, pids = open_firefox(h, 'bb')
     if not xid:
@@ -707,19 +707,34 @@ def scenario_bubble(h: Harness) -> None:
         return
     before = len(h.db())
     h.ensure_active(xid)
-    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: 同意 (agree)
-    popup = h.wait(h.app_active, 4)
-    if not h.check('click a type → popup opens', popup):
-        return
-    h.shot('bubble_popup', popup)
-    h.key('Return', popup)
+    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: 同意 (agree, input none)
     saved = h.wait(lambda: len(h.db()) == before + 1, 3)
+    h.check('simple tag (同意) saved at once, no popup', saved and not h.app_active(), f'active {h.app_active()}')
+    h.check('…and the focus stays in the source window', windows.active_xid() == xid)
     rows = sorted(h.db(), key=lambda r: r['created_at'])
-    if h.check('annotation saved from the bubble', saved and rows):
+    if rows:
         r = rows[-1]
         h.check('bubble: type agree, the mouse-selected quote, AT-SPI anchor',
                 r['type_id'] == 'agree' and '梯度爆炸' in r['quote'] and r['anchor'].get('method') == 'atspi', str(r))
 
+    h.drag(x0, y, x1, xid)                                       # ⋯ opens the full menu
+    rect = h.wait(lambda: bubble_rect(h), 3)
+    if not h.check('bubble after selecting again', rect):
+        return
+    before = len(h.db())
+    h.ensure_active(xid)
+    click(rect[0] + rect[2] - 14, rect[1] + rect[3] // 2)         # last button: ⋯
+    popup = h.wait(h.app_active, 4)
+    if not h.check('click ⋯ → popup opens', popup):
+        return
+    h.shot('bubble_popup', popup)
+    h.key('5', popup)                                            # 展开 (optional comment)
+    h.pump(0.2)
+    h.key('Return', popup)
+    saved = h.wait(lambda: len(h.db()) == before + 1, 3)
+    rows = sorted(h.db(), key=lambda r: r['created_at'])
+    h.check('annotation saved through the menu', saved and rows and rows[-1]['type_id'] == 'expand',
+            str(rows[-1] if rows else None))
 
 SCENARIOS = {'firefox': scenario_firefox, 'terminal': scenario_terminal, 'vscode': scenario_vscode,
              'highlight': scenario_highlight, 'bubble': scenario_bubble}

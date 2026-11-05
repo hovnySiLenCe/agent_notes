@@ -32,10 +32,11 @@ def config_path() -> Path:
 
 
 DEFAULT_TYPES = [   # the menu shows 4 per row; order = keys 1-9, 0
-    # row 1 in the menu (and the selection bubble): react to what the agent said
-    {'id': 'agree', 'name': '同意', 'color': '#16A34A', 'hotkey': 'Shift+Alt+Y', 'input': 'optional',
+    # row 1 in the menu (and the selection bubble): react to what the agent said.
+    # Simple tags (同意 / 不同意 / 忽略 / 已解决 / 保留) use input 'none': picked = saved, no comment box.
+    {'id': 'agree', 'name': '同意', 'color': '#16A34A', 'hotkey': 'Shift+Alt+Y', 'input': 'none',
      'template': '【同意】{{#quote}}「{{quote}}」{{/quote}}→ 同意这一点，按这个思路继续{{#comment}}（{{comment}}）{{/comment}}'},
-    {'id': 'disagree', 'name': '不同意', 'color': '#C2185B', 'hotkey': 'Shift+Alt+N', 'input': 'optional',
+    {'id': 'disagree', 'name': '不同意', 'color': '#C2185B', 'hotkey': 'Shift+Alt+N', 'input': 'none',
      'template': '【不同意】{{#quote}}「{{quote}}」{{/quote}}→ 我不同意这一点{{#comment}}：{{comment}}{{/comment}}，请重新考虑'},
     {'id': 'ask', 'name': '追问', 'color': '#F5A623', 'hotkey': 'Shift+Alt+Q', 'input': 'required',
      'template': '【追问】{{#quote}}「{{quote}}」{{/quote}}→ {{comment}}'},
@@ -51,11 +52,11 @@ DEFAULT_TYPES = [   # the menu shows 4 per row; order = keys 1-9, 0
     {'id': 'code', 'name': '给出代码', 'color': '#0EA5A4', 'hotkey': '', 'input': 'optional',
      'template': '【给出代码】{{#quote}}「{{quote}}」{{/quote}}→ 请给出对应的代码示例{{#comment}}，要求：{{comment}}{{/comment}}'},
     # row 3: keep / drop
-    {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'optional',
+    {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'none',
      'template': '【忽略】{{#quote}}「{{quote}}」{{/quote}}→ 这部分不用管，后续回复中不必再处理或提及{{#comment}}（{{comment}}）{{/comment}}'},
-    {'id': 'solved', 'name': '已解决', 'color': '#64748B', 'hotkey': '', 'input': 'optional',
+    {'id': 'solved', 'name': '已解决', 'color': '#64748B', 'hotkey': '', 'input': 'none',
      'template': '【已解决】{{#quote}}「{{quote}}」{{/quote}}→ 这个问题已经解决了，不用再处理{{#comment}}（{{comment}}）{{/comment}}'},
-    {'id': 'keep', 'name': '保留', 'color': '#84A63A', 'hotkey': '', 'input': 'optional',
+    {'id': 'keep', 'name': '保留', 'color': '#84A63A', 'hotkey': '', 'input': 'none',
      'template': '【保留】{{#quote}}「{{quote}}」{{/quote}}→ 这部分很好，修改时请保留{{#comment}}（{{comment}}）{{/comment}}'},
 ]
 
