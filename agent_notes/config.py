@@ -48,6 +48,8 @@ DEFAULT_TYPES = [
      'template': '【保留】{{#quote}}「{{quote}}」{{/quote}}→ 这部分很好，修改时请保留{{#comment}}（{{comment}}）{{/comment}}'},
     {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'optional',
      'template': '【忽略】{{#quote}}「{{quote}}」{{/quote}}→ 这部分不用管，后续回复中不必再处理或提及{{#comment}}（{{comment}}）{{/comment}}'},
+    {'id': 'solved', 'name': '已解决', 'color': '#3FB27F', 'hotkey': '', 'input': 'optional',
+     'template': '【已解决】{{#quote}}「{{quote}}」{{/quote}}→ 这个问题已经解决了，不用再处理{{#comment}}（{{comment}}）{{/comment}}'},
 ]
 
 DEFAULTS = {
