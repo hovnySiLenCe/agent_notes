@@ -53,7 +53,7 @@ class Platform(ABC):
         """worker: activate `target`, focus its chat input and paste (clipboard already prepared)."""
 
     @abstractmethod
-    def track(self, reqs: list[dict], focus: set[str]) -> dict:
+    def track(self, reqs: list[dict], focus: set[str], moving: bool = False) -> dict:
         """worker: current screen rectangles of annotated text (see atspi.tracker.Tracker.update)."""
 
     @abstractmethod

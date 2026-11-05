@@ -80,6 +80,10 @@ Chrome / Chromium / VS Code 等 Electron 应用若没有开启，可在启动参
 
 - 在某个窗口里工作时，该窗口里**待发送**批注对应的原文会被标上类型颜色的半透明高亮（`highlight.show` 可改为 `all` 包括已发送的，或 `hover` 只在悬停时显示）。
 - 高亮跟随滚动；滚出视野、被浏览器工具栏或其它窗口挡住的部分不画；高亮层不接收鼠标，不影响点击和选字。
+  滚动时约 60 帧/秒，每帧只需约 1 ms（只查询原文首尾两个字符的位置，平移时直接平移已有矩形）；静止时每 0.1 秒检查一次。
+  原文暂时不在无障碍树里时（VS Code 聊天会移除滚得较远的消息），查找要遍历整个窗口的树（约 0.3 秒）：
+  这一步被切成每帧 15 ms 的小片、滚动时暂停、同一窗口的多条批注共用一次遍历；一直找不到的批注重试间隔从 3 秒
+  逐次翻倍到 60 秒，每次停止滚动后再立即找一次。所以高亮跟随不会因为查找而卡顿。
 - 鼠标**悬停在卡片上**：对应原文加深显示（即使不在当前窗口）。
 - **双击卡片**或点卡片上的 ⌖：切到来源窗口，把原文滚动到可见处并闪烁高亮。
 - 卡片上的小标记：◉ 原文可见 / ○ 已滚出视野 / ⚠ 原文找不到（页面关了或内容变了）。
@@ -93,6 +97,8 @@ Chrome / Chromium / VS Code 等 Electron 应用若没有开启，可在启动参
 
 填入方式：普通应用用剪贴板 + `Ctrl+V`（先用无障碍接口找到并聚焦聊天输入框），终端用 PRIMARY + `Shift+Insert`；
 完成后恢复原剪贴板。默认**不自动发送**。若无法切换到目标窗口，内容留在剪贴板并提示手动粘贴。
+填入前会等你松开快捷键的所有按键（包括 `Shift+Alt+Return` 里的回车，避免回车的自动重复落进输入框）。
+`prompt.trailing_newline` 设为 `true` 时，填入的内容末尾多一个换行，光标落在新的一行，方便接着写（填入终端时不加，以免直接执行）。
 
 ## 配置
 
@@ -115,6 +121,8 @@ Chrome / Chromium / VS Code 等 Electron 应用若没有开启，可在启动参
 - `input`：`none` 直接保存 / `optional` 可选说明 / `required` 必须填写
 - `template` 变量：`{{quote}}` `{{comment}}` `{{name}}`；`{{#comment}}…{{/comment}}` 仅在有说明时输出
 - `fill.mode`：`fill` 自动填入 / `copy` 只复制到剪贴板；`fill.target`：`source` 批注来源窗口 / `active` 当前窗口
+- `prompt`：`header` / `footer` 开头结尾、`quote_max_chars` 引用最大长度、`plain_template` 纯净填入格式、
+  `trailing_newline` 末尾多一个换行
 - `highlight.enabled`：是否在原文上画高亮；`highlight.show`：`pending` / `all`（不含已解决）/ `hover`
 - `bubble.enabled`：选中文字后显示划词按钮；`bubble.types`：显示前几个类型；`bubble.timeout_ms`：自动消失时间
 - `panel`：`auto_collapse`、`expand_distance`、`idle_opacity`、`opacity`；`popup.opacity`

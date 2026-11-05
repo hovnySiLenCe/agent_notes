@@ -4,6 +4,12 @@ Each tick costs two character-extent queries per located text segment: when they
 rectangles are reused; when both ends moved by the same offset (scrolling), the rectangles are shifted and only
 the clipping is recomputed; anything else (reflow, resize) re-measures. The text is re-verified every few
 seconds and located again when it changed.
+
+Finding a quote that isn't where it was captured means walking the window's whole accessibility tree (VS Code's
+chat drops messages scrolled far away, so this happens a lot). That walk never blocks tracking: it runs in small
+slices after the measuring, pauses while the user scrolls, is shared by all quotes searched in that window, and
+quotes that stay missing are searched for less and less often (again soon after each scroll, which may have
+brought them back).
 """
 from __future__ import annotations
 
@@ -12,12 +18,15 @@ from dataclasses import dataclass, field
 
 from ..x11 import windows
 from .geometry import EMPTY, Rect, intersect, text_rects, visible_area, vte_rects
-from .locate import Segment, locate, scroll_into_view
+from .locate import Segment, collect, fast_locate, frames_for, locate, resolve, scroll_into_view, single_node
 from .tree import OBJ, Atspi, T
 
-RETRY_AFTER = 3.0        # s before trying again to locate a quote that wasn't found
+RETRY_AFTER = 3.0        # s before searching again for a quote that wasn't found; doubles with every miss …
+RETRY_MAX = 60.0         # … up to this
 VERIFY_EVERY = 2.0       # s between checks that the located text is still the same
-LOCATE_BUDGET = 0.6      # s of tree walking per locate; at most one locate per tick
+SEARCH_SLICE = 0.015     # s per tick for finding quotes (fast-path checks + tree walking), little while scrolling
+MOVING_SLICE = 0.003     # (enough to re-check a path, not to walk)
+FRAME_TTL = 10.0         # s a window's frame lookup is reused (a cold lookup can take ~50 ms: never while scrolling)
 
 
 @dataclass
@@ -38,9 +47,29 @@ class _Seg:
 @dataclass
 class _Entry:
     key: tuple
-    segs: list[_Seg] | None          # None: not found
-    since: float = 0.0               # when located / when the failed attempt was made
+    segs: list[_Seg] | None = None   # None: not found (yet)
     verified_at: float = 0.0
+    searching: bool = False          # waiting for its window's tree walk
+    partial: list[Segment] | None = None   # fast path's first segment of a multi-node capture
+    misses: int = 0                  # searches in a row that didn't find it
+    retry_at: float = 0.0
+
+
+@dataclass
+class _Walk:
+    """A resumable walk over one window's tree, collecting its text nodes."""
+    nodes: list
+    steps: object                    # the collect() generator
+    done: bool = False
+
+    def run(self, until: float) -> None:
+        try:
+            while time.monotonic() < until:
+                next(self.steps)
+        except StopIteration:
+            self.done = True
+        except Exception:            # the tree changed under us badly enough: use what we have
+            self.done = True
 
 
 def _ends(seg: Segment) -> tuple[int, int] | None:
@@ -82,6 +111,10 @@ class Tracker:
         self.own_pid = own_pid
         self.context_xid: int | None = None       # last active window that isn't one of ours
         self._entries: dict[str, _Entry] = {}
+        self._walks: dict[int, _Walk] = {}         # xid -> walk in progress
+        self._frames: dict[int, tuple] = {}        # xid -> (frame, looked up at)
+        self._budget_end = 0.0                     # this tick's time for finding quotes ends here
+        self._was_moving = False
 
     def _verified(self, e: _Entry, now: float) -> bool:
         if now - e.verified_at < VERIFY_EVERY:
@@ -93,36 +126,93 @@ class Tracker:
         e.verified_at = now
         return ok
 
-    def _entry(self, req: dict, now: float, may_locate: bool) -> tuple[_Entry | None, bool]:
-        """(entry or None if not attempted yet, whether a locate ran)."""
+    def _frame(self, req: dict):
+        xid, now = req['xid'], time.monotonic()
+        hit = self._frames.get(xid)
+        if hit is None or now - hit[1] > FRAME_TTL:
+            frames = frames_for(req.get('pid'), xid)
+            hit = self._frames[xid] = (frames[0] if frames else None, now)
+        return hit[0]
+
+    def _entry(self, req: dict, now: float) -> _Entry:
+        """The entry for `req`, trying the (cheap) fast path when it needs finding; otherwise it is left
+        `searching` for its window's walk."""
         key = (req['xid'], req['quote'])
         e = self._entries.get(req['id'])
-        if e is not None and e.key == key:
-            if e.segs is not None and self._verified(e, now):
-                return e, False
-            if e.segs is None and now - e.since < RETRY_AFTER:
-                return e, False
-        if not may_locate:
-            return None, False
-        segs = locate(req.get('pid'), req['xid'], req.get('anchor') or {}, req['quote'], LOCATE_BUDGET)
-        e = _Entry(key, [_Seg(s) for s in segs] if segs else None, since=now, verified_at=now)
-        self._entries[req['id']] = e
-        return e, True
+        if e is None or e.key != key:
+            e = self._entries[req['id']] = _Entry(key)
+        elif e.segs is not None:
+            if self._verified(e, now):
+                return e
+            e.segs, e.misses = None, 0             # the text changed: find it again now
+        elif e.searching or now < e.retry_at:
+            return e
+        if time.monotonic() > self._budget_end:    # this tick's time is used up: next tick
+            return e
+        if self._was_moving and req['xid'] not in self._frames:
+            return e
+        anchor, quote = req.get('anchor') or {}, req['quote']
+        frame = self._frame(req)
+        fast = fast_locate(frame, anchor, quote) if frame is not None else None
+        if fast is not None and single_node(anchor):
+            e.segs, e.misses, e.verified_at, e.partial = [_Seg(s) for s in fast], 0, now, None
+        else:
+            e.searching, e.partial = True, fast
+        return e
 
-    def update(self, reqs: list[dict], focus: set[str]) -> dict:
+    def _search(self, wanted: dict[int, list], until: float) -> bool:
+        """Advance the walks of windows with quotes to find; when a walk completes, settle its quotes.
+        Returns True while a search is still in progress."""
+        self._walks = {x: w for x, w in self._walks.items() if x in wanted}
+        for xid, lst in wanted.items():
+            if time.monotonic() >= until:
+                break
+            w = self._walks.get(xid)
+            if w is None:
+                frame = self._frame(lst[0][0])
+                nodes: list = []
+                w = self._walks[xid] = _Walk(nodes, collect(frame, nodes) if frame is not None else iter(()))
+            w.run(until)
+            if not w.done:
+                continue
+            del self._walks[xid]
+            now = time.monotonic()
+            for req, e in lst:
+                try:
+                    segs = resolve(w.nodes, req.get('anchor') or {}, req['quote'], e.partial)
+                except Exception:
+                    segs = None
+                e.searching, e.partial = False, None
+                if segs:
+                    e.segs, e.misses, e.verified_at = [_Seg(s) for s in segs], 0, now
+                else:
+                    e.misses += 1
+                    e.retry_at = now + min(RETRY_MAX, RETRY_AFTER * 2 ** (e.misses - 1))
+                    self._frames.pop(xid, None)    # (in case the window was rebuilt: look its frame up afresh)
+        return bool(self._walks)
+
+    def update(self, reqs: list[dict], focus: set[str], moving: bool = False) -> dict:
         """reqs: [{id, xid, pid, anchor, quote}]. Measures the annotations from the window the user is working in,
-        plus those in `focus`. Returns {'context': xid, 'items': {id: {state, rects}}, 'windows': {xid: {...}}}
+        plus those in `focus`. moving: the user is scrolling (no time for searching).
+        Returns {'context': xid, 'items': {id: {state, rects}}, 'windows': {xid: {...}}, 'searching': bool}
         with state ok | offscreen (scrolled away) | missing (text not found) | hidden (window not shown)."""
         active = windows.active_window()
         if active is not None and active.pid != self.own_pid:
             self.context_xid = active.xid
         now = time.monotonic()
-        wanted = {r['id'] for r in reqs}
-        self._entries = {k: v for k, v in self._entries.items() if k in wanted}
+        self._budget_end = now + (MOVING_SLICE if moving else SEARCH_SLICE)
+        self._frames = {x: f for x, f in self._frames.items() if now - f[1] <= FRAME_TTL}
+        wanted_ids = {r['id'] for r in reqs}
+        self._entries = {k: v for k, v in self._entries.items() if k in wanted_ids}
+        if self._was_moving and not moving:        # scrolling stopped: missing quotes may be back in the tree
+            for e in self._entries.values():
+                e.retry_at = min(e.retry_at, now)
+        self._was_moving = moving
         items: dict[str, dict] = {}
         wins: dict[int, dict] = {}
-        located = False
-        for req in sorted(reqs, key=lambda r: r['id'] not in focus):       # focused ones get located first
+        wanted: dict[int, list] = {}
+        deferred = False                              # due for finding, but this tick's time ran out
+        for req in sorted(reqs, key=lambda r: r['id'] not in focus):       # focused ones get searched first
             xid = req['xid']
             if req['id'] not in focus and xid != self.context_xid:
                 continue
@@ -133,27 +223,44 @@ class Tracker:
             if not wins[xid]['shown']:
                 items[req['id']] = {'state': 'hidden', 'rects': []}
                 continue
-            e, ran = self._entry(req, now, may_locate=not located)
-            located = located or ran
-            if e is None:
+            try:
+                e = self._entry(req, now)
+            except Exception:
                 continue
             if e.segs is None:
-                items[req['id']] = {'state': 'missing', 'rects': []}
+                if e.searching:
+                    wanted.setdefault(xid, []).append((req, e))
+                elif now >= e.retry_at:
+                    deferred = True
+                if e.misses:
+                    items[req['id']] = {'state': 'missing', 'rects': []}
                 continue
-            try:
-                for s in e.segs:
-                    _refresh(s, xid)
-            except Exception:
-                self._entries.pop(req['id'], None)    # the node went away: locate again on a later tick
-                continue
-            rects = [r for s in e.segs for r in s.rects()]
-            items[req['id']] = {'state': 'ok' if rects else 'offscreen', 'rects': rects}
-        return {'context': self.context_xid, 'items': items, 'windows': wins}
+            self._measure(req, e, items)
+        searching = bool(wanted) and self._search(wanted, self._budget_end if not moving else 0)
+        for lst in wanted.values():                   # settled just now: show them right away
+            for req, e in lst:
+                if e.segs is not None:
+                    self._measure(req, e, items)
+                elif e.misses:
+                    items[req['id']] = {'state': 'missing', 'rects': []}
+        return {'context': self.context_xid, 'items': items, 'windows': wins,
+                'searching': searching or deferred or (bool(wanted) and moving)}
+
+    @staticmethod
+    def _measure(req: dict, e: _Entry, items: dict) -> None:
+        try:
+            for s in e.segs:
+                _refresh(s, req['xid'])
+        except Exception:                             # the node went away: find it again on a later tick
+            e.segs, e.misses, e.retry_at = None, 0, 0.0
+            return
+        rects = [r for s in e.segs for r in s.rects()]
+        items[req['id']] = {'state': 'ok' if rects else 'offscreen', 'rects': rects}
 
     def reveal(self, req: dict) -> bool:
         """Scroll the annotated text into view inside its window (locating it afresh)."""
         self._entries.pop(req['id'], None)
-        e, _ = self._entry(req, time.monotonic(), may_locate=True)
-        if e is None or not e.segs:
+        segs = locate(req.get('pid'), req['xid'], req.get('anchor') or {}, req['quote'])
+        if not segs:
             return False
-        return scroll_into_view(e.segs[0].seg)
+        return scroll_into_view(segs[0])

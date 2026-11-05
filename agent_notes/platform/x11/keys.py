@@ -9,8 +9,6 @@ from Xlib.ext import xtest
 from . import display as xd
 
 MOD_KEYSYMS = {'shift': 'Shift_L', 'ctrl': 'Control_L', 'control': 'Control_L', 'alt': 'Alt_L', 'super': 'Super_L'}
-_HELD_MODIFIERS = ('Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R',
-                   'Super_L', 'Super_R', 'Meta_L', 'Meta_R', 'ISO_Level3_Shift')
 
 
 def _keycode(name: str) -> int:
@@ -35,14 +33,17 @@ def send(combo: str) -> None:
     d.sync()
 
 
-def wait_modifiers_released(timeout: float = 1.5) -> bool:
-    """The user is still holding Shift+Alt from the hotkey; injecting ctrl+v now would become ctrl+shift+alt+v."""
+def wait_keys_released(timeout: float = 2.0) -> bool:
+    """Wait until the user lets go of the hotkey that triggered us, all of it.
+
+    Modifiers still held would turn ctrl+v into ctrl+shift+alt+v. A held Return (Shift+Alt+Return fills) is
+    worse: once the modifiers are up, its auto-repeat lands in the agent's input box as an extra newline (or, with
+    Shift still down, Shift+Return = newline in most chat inputs).
+    """
     d = xd.get()
-    codes = [c for c in (d.keysym_to_keycode(XK.string_to_keysym(n)) for n in _HELD_MODIFIERS) if c]
     end = time.monotonic() + timeout
     while True:
-        km = d.query_keymap()
-        if not any(km[c // 8] & (1 << (c % 8)) for c in codes):
+        if not any(d.query_keymap()):
             return True
         if time.monotonic() > end:
             return False

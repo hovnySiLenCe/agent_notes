@@ -67,7 +67,8 @@ DEFAULTS = {
         'types': '批注类型（菜单每行 4 个，按 1-9、0 选前 10 个，其余用方向键）。input: none=直接保存 / optional=可选说明 / required=必须输入；'
                  'template 变量：{{quote}} {{comment}} {{name}}，{{#comment}}…{{/comment}} 表示有说明时才输出',
         'prompt': '拼装 prompt 的开头/结尾；quote_max_chars 为引用原文的最大长度（超出时省略中间）；'
-                  'plain_template 为 fill_plain 时每条批注的格式',
+                  'plain_template 为 fill_plain 时每条批注的格式；trailing_newline 为 true 时填入的内容末尾多一个换行'
+                  '（光标落在新的一行，方便接着写；填入终端时不加，以免直接执行）',
         'panel': 'auto_collapse=鼠标离开后自动收起成小条（面板上 📌 可固定展开）；expand_distance=鼠标离小条多近（像素）就展开；'
                  'idle_opacity=收起时小条的不透明度，'
                  'opacity=展开时的不透明度，取值 0.15~1',
@@ -83,6 +84,7 @@ DEFAULTS = {
                 'toggle_panel': 'Shift+Alt+D'},
     'types': DEFAULT_TYPES,
     'prompt': {'header': '请根据以下批注，修改或补充你上一条回复：', 'footer': '', 'quote_max_chars': 160,
+               'trailing_newline': False,
                'plain_template': '{{#quote}}「{{quote}}」{{/quote}}{{#comment}} {{comment}}{{/comment}}'},
     'fill': {'mode': 'fill', 'target': 'source', 'auto_send': False, 'mark_sent': True},
     'panel': {'auto_collapse': True, 'expand_distance': 40, 'idle_opacity': 0.5, 'opacity': 0.96},

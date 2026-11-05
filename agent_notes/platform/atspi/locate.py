@@ -1,13 +1,15 @@
 """Find a stored annotation's quote again in the live accessibility tree. Worker thread only.
 
 Fast path: the child-index path and offsets recorded at capture time still point at the same text.
-Slow path: search the text nodes (starting from the web document the path went through) for the quote,
-using the captured prefix/suffix to choose between repeated occurrences.
+Slow path: collect the window's text nodes (a tree walk, the expensive part: ~0.1 ms per node over D-Bus) and
+search them for the quote, using the captured prefix/suffix to choose between repeated occurrences. The walk is
+a generator so the tracker can spread it over several ticks and share it between all quotes in a window.
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Iterator
 
 from ...core.anchor import find_quote, normalize, parts
 from ..x11 import windows
@@ -109,41 +111,57 @@ def _fast_path(frame, anchor: dict, quote: str) -> list[Segment] | None:
     return [Segment(node, s, len(text), text[s:])]  # middle + last filled in by the caller's walk
 
 
+def single_node(anchor: dict) -> bool:
+    """Captured inside one text node: the fast path alone settles it."""
+    return tuple(anchor.get('end_path') or anchor.get('path') or ()) == tuple(anchor.get('path') or ())
+
+
+def fast_locate(frame, anchor: dict, quote: str) -> list[Segment] | None:
+    """The fast path only. For a multi-node capture it returns just the first segment (complete it with
+    resolve() over collected nodes)."""
+    if anchor.get('method') != 'atspi' or not quote.strip():
+        return None
+    return _fast_path(frame, anchor, quote)
+
+
+def collect(root, out: list) -> Iterator[None]:
+    """Walk `root` (the window's frame), appending (node, path, text) for every text node to `out`.
+    Yields after each node: the caller decides how much of the walk runs now and resumes it later."""
+    for node, path, _ in walk(root, float('inf')):
+        text = _text(node)
+        if text and text.replace(OBJ, '').strip():
+            out.append((node, path, text))
+        yield
+
+
+def resolve(nodes: list, anchor: dict, quote: str, fast: list[Segment] | None) -> list[Segment] | None:
+    """Find the quote among collected text nodes (`fast`: the fast path's first segment of a multi-node capture)."""
+    path = tuple(anchor.get('path') or ())
+    end_path = tuple(anchor.get('end_path') or path)
+    if fast is not None:
+        last = next(((n, p, t) for n, p, t in nodes if p == end_path), None)
+        if last is not None:
+            return fast + _between(nodes, path, end_path) + \
+                [Segment(last[0], 0, anchor.get('end', 0), last[2][:anchor.get('end', 0)])]
+    return _search(nodes, anchor, quote, path)
+
+
 def locate(pid: int | None, xid: int, anchor: dict, quote: str, budget: float = 0.8) -> list[Segment] | None:
+    """Blocking: fast path, else walk the window (for at most `budget` seconds) and search it."""
     if anchor.get('method') != 'atspi' or not quote.strip():
         return None
     deadline = time.monotonic() + budget
     frames = frames_for(pid, xid)
     if not frames:
         return None
-    frame = frames[0]
-    path = tuple(anchor.get('path') or ())
-    end_path = tuple(anchor.get('end_path') or path)
-    fast = _fast_path(frame, anchor, quote)
-    if fast is not None and end_path == path:
+    fast = fast_locate(frames[0], anchor, quote)
+    if fast is not None and single_node(anchor):
         return fast
-
-    # Search below the web document the capture went through (much smaller than the whole window), else everywhere.
-    _, doc, doc_path = node_at(frame, path)
-    roots = [(doc, doc_path)] if doc is not None else []
-    roots += [(f, ()) for f in frames]
-    for root, prefix in roots:
-        nodes = []
-        for node, rel, _ in walk(root, deadline):
-            text = _text(node)
-            if text and text.replace(OBJ, '').strip():
-                nodes.append((node, prefix + rel, text))
-        if fast is not None and root is doc:
-            last = next(((n, p, t) for n, p, t in nodes if p == end_path), None)
-            if last is not None:
-                return fast + _between(nodes, path, end_path) + \
-                    [Segment(last[0], 0, anchor.get('end', 0), last[2][:anchor.get('end', 0)])]
-        found = _search(nodes, anchor, quote, path)
-        if found:
-            return found
+    nodes: list = []
+    for _ in collect(frames[0], nodes):
         if time.monotonic() > deadline:
             break
-    return None
+    return resolve(nodes, anchor, quote, fast)
 
 
 def _search(nodes: list, anchor: dict, quote: str, path: tuple) -> list[Segment] | None:

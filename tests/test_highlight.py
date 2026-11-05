@@ -40,7 +40,7 @@ class HighlighterTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.track_result = {}
-        self.platform = SimpleNamespace(track=lambda reqs, focus: self.track_result, window_exists=lambda x: True,
+        self.platform = SimpleNamespace(track=lambda reqs, focus, moving=False: self.track_result, window_exists=lambda x: True,
                                         activate=lambda x: None, reveal=lambda req: True)
         self.ctl = SimpleNamespace(cfg=cfgmod.Config(json.loads(json.dumps(cfgmod.DEFAULTS))), state={},
                                    store=Store(Path(self.tmp.name) / 'n.db'), worker=FakeWorker(),
@@ -127,7 +127,8 @@ class HighlighterTest(unittest.TestCase):
         self.assertEqual(self.hl._timer.interval(), highlight.SLOW_MS)
         self.hl.scrolled()
         self.hl.tick()
-        self.assertEqual(self.hl._timer.interval(), highlight.FAST_MS)
+        self.assertLessEqual(self.hl._timer.interval(), highlight.FAST_MS)
+        self.assertTrue(self.ctl.worker.calls[-1][1][2])     # the tracker is told the user is scrolling
 
     def test_jump_flashes_or_reports_missing(self):
         self.hl.jump(self.a)

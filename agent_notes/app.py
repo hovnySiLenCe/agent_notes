@@ -264,6 +264,8 @@ class Controller(QObject):
             self.toast.show_message(f'已复制 {len(items)} 条批注到剪贴板', 'ok', near=self.panel)
             return
         terminal = self.platform.is_terminal(target)
+        if self.cfg.prompt.get('trailing_newline') and not terminal:   # in a terminal it could run the line
+            text += '\n'
         saved = {QClipboard.Clipboard: _copy_mime(cb.mimeData(QClipboard.Clipboard))}
         cb.setText(text, QClipboard.Clipboard)
         if terminal:   # terminals paste PRIMARY on Shift+Insert

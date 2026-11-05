@@ -8,6 +8,7 @@ several times, the captured prefix/suffix context and the old offset pick the ri
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 OBJ = '￼'
 
@@ -69,9 +70,21 @@ def score(text: str, start: int, end: int, prefix: str = '', suffix: str = '') -
         _common_prefix(after.lstrip(), normalize(suffix)[0].lstrip())
 
 
+_GAPS = re.compile('[\\s' + OBJ + ']+')
+
+
+@lru_cache(maxsize=8192)                # the same node texts are tested against every quote being searched for
+def compact(text: str) -> str:
+    """Text without whitespace and placeholders: if `quote` occurs in `text` in any form find_all accepts,
+    compact(quote) is a substring of compact(text). A cheap (C-speed) test before the real matching."""
+    return _GAPS.sub('', text)
+
+
 def find_quote(text: str, quote: str, prefix: str = '', suffix: str = '', near: int | None = None
                ) -> tuple[int, int, int] | None:
     """Best occurrence of `quote` in `text` as (start, end, context score), or None."""
+    if compact(quote) not in compact(text):
+        return None
     best = None
     for s, e in find_all(text, quote):
         key = (score(text, s, e, prefix, suffix), -abs(s - near) if near is not None else 0)

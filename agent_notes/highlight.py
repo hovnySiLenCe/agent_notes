@@ -19,9 +19,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-FAST_MS = 33           # while things are moving (scrolling): ~30 fps; a tick that moved costs ~20 ms
-SLOW_MS = 150          # while nothing changes (a tick that finds nothing moved costs ~1 ms)
+FAST_MS = 16           # frame period while things are moving (scrolling): ~60 fps; a tick costs ~1-3 ms
+SLOW_MS = 100          # while nothing changes (a tick that finds nothing moved costs ~1 ms)
+SEARCH_MS = 50         # while a quote is being searched for (the search runs in slices, one per tick)
 MOVING_S = 1.2         # keep polling fast this long after the last movement / wheel turn
+SETTLE_S = 0.3         # "still scrolling" for the tracker (no searching) until this long after the last movement
 IDLE_MS = 1000         # nothing to track
 FLASH_S = 2.5          # how long a jumped-to annotation stays emphasized
 SHOW_MODES = ('pending', 'all', 'hover')
@@ -43,6 +45,8 @@ class Highlighter(QObject):
         self.states: dict[str, str] = {}         # ann id -> ok | offscreen | missing | hidden
         self._inflight = False
         self._moving_until = 0.0
+        self._last_motion = 0.0
+        self._tick_at = 0.0
         self._last_marks: tuple = ()
         self._timer = QTimer(self, singleShot=True, timeout=self.tick)
         self._timer.start(SLOW_MS)
@@ -88,7 +92,8 @@ class Highlighter(QObject):
 
     def scrolled(self) -> None:
         """The mouse wheel turned somewhere: content is about to move, track it closely from now on."""
-        self._moving_until = time.monotonic() + MOVING_S
+        self._last_motion = time.monotonic()
+        self._moving_until = self._last_motion + MOVING_S
         if not self._inflight:
             self._timer.start(0)
 
@@ -129,7 +134,9 @@ class Highlighter(QObject):
             self._timer.start(IDLE_MS)
             return
         self._inflight = True
-        self.ctl.worker.submit(self.ctl.platform.track, reqs, self.focus_ids(), cb=self._on_tracked)
+        self._tick_at = time.monotonic()
+        moving = self._tick_at - self._last_motion < SETTLE_S
+        self.ctl.worker.submit(self.ctl.platform.track, reqs, self.focus_ids(), moving, cb=self._on_tracked)
 
     def _on_tracked(self, res) -> None:
         self._inflight = False
@@ -138,8 +145,12 @@ class Highlighter(QObject):
             return
         now = time.monotonic()
         if self.apply(res):
+            self._last_motion = now
             self._moving_until = now + MOVING_S
-        self._timer.start(FAST_MS if now < self._moving_until or self.focus_ids() else SLOW_MS)
+        if now < self._moving_until or self.focus_ids():
+            self._timer.start(max(0, FAST_MS - int((now - self._tick_at) * 1000)))     # a steady frame rate
+        else:
+            self._timer.start(SEARCH_MS if res.get('searching') else SLOW_MS)
 
     # ---- painting -------------------------------------------------------------------------------------------
     def _own_windows(self) -> QRegion:

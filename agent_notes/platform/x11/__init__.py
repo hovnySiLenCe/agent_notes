@@ -26,8 +26,8 @@ class X11Platform(Platform):
             self._tracker = Tracker(self.own_pid)
         return self._tracker
 
-    def track(self, reqs: list[dict], focus: set[str]) -> dict:
-        return self._get_tracker().update(reqs, focus)
+    def track(self, reqs: list[dict], focus: set[str], moving: bool = False) -> dict:
+        return self._get_tracker().update(reqs, focus, moving)
 
     def reveal(self, req: dict) -> bool:
         return self._get_tracker().reveal(req)
@@ -60,7 +60,7 @@ class X11Platform(Platform):
         return capture_selection(win.pid, win.title, primary)
 
     def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool) -> dict:
-        keys.wait_modifiers_released()
+        keys.wait_keys_released()
         windows.activate(target.xid)
         if not windows.wait_active(target.xid, 1.2):
             return {'ok': False, 'reason': 'activate'}

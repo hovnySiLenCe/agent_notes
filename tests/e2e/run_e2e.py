@@ -326,13 +326,17 @@ def scenario_firefox(h: Harness) -> None:
     if panel:
         h.shot('firefox_panel', panel)
 
-    expected = h.expected_fill(rows)
+    cfg_path = h.app_dir / 'config' / 'config.json'           # option: one more line break after the prompt
+    data = json.loads(cfg_path.read_text(encoding='utf-8'))
+    data['prompt']['trailing_newline'] = True
+    cfg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    expected = h.expected_fill(rows) + '\n'
     QGuiApplication.clipboard().setText(ORIGINAL_CLIPBOARD, QClipboard.Clipboard)
-    h.pump(0.3)
+    h.pump(2.6)                     # the app picks up config changes by itself (polling every 2 s without inotify)
     h.key('shift+alt+Return', xid)
     entry = h.find_entry(pids, '输入框')
     got = h.wait(lambda: entry is not None and T.get_text(entry, 0, T.get_character_count(entry)), 6)
-    h.check('fill: textarea receives the composed prompt', got == expected, f'got={got!r}\nexpected={expected!r}')
+    h.check('fill: textarea receives the composed prompt (+ trailing newline)', got == expected, f'got={got!r}\nexpected={expected!r}')
     h.check('fill: annotations marked sent', h.wait(lambda: all(r['status'] == 'sent' for r in h.db()), 3))
     restored = h.wait(lambda: QGuiApplication.clipboard().text(QClipboard.Clipboard) == ORIGINAL_CLIPBOARD, 4)
     h.check('fill: original clipboard restored', restored, QGuiApplication.clipboard().text()[:60])
@@ -562,8 +566,11 @@ def scenario_highlight(h: Harness) -> None:
     h.check('plain-text quote anchored by searching the tree', anchor is not None and anchor.get('path') is not None,
             str(anchor))
     if anchor:
-        res = Tracker(os.getpid()).update([{'id': 'p', 'xid': xid, 'pid': pid, 'anchor': anchor, 'quote': plain}],
-                                          {'p'})
+        tracker, reqs = Tracker(os.getpid()), [{'id': 'p', 'xid': xid, 'pid': pid, 'anchor': anchor, 'quote': plain}]
+        for _ in range(100):                # a quote spanning elements is searched for over several ticks
+            res = tracker.update(reqs, {'p'})
+            if not res['searching']:
+                break
         item = res['items'].get('p', {})
         target = quote_rect(pids, '范数限制在')             # (the quote wraps after 把: test a part on line 2)
         h.check('…and the tracker measures it on screen', item.get('state') == 'ok' and covers(item['rects'], target),
