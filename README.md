@@ -21,6 +21,11 @@
 
 后台运行的输出在 `~/.local/share/agent-notes/agent-notes.out`，日志在同目录 `agent-notes.log`。
 
+**崩溃隔离**：读取选区、定位原文、跟踪高亮、填入等无障碍 / X 查询都在一个辅助进程里运行（`agent_notes/helper.py`）。
+VS Code 这类 Electron 应用在界面元素被销毁的瞬间被查询时，系统的 libatspi 可能直接段错误；现在只会让辅助进程退出，
+主程序（面板、快捷键、数据）不受影响，下一次查询自动换一个新的辅助进程。查询超过 15 秒没有返回也会被结束并重启。
+主程序崩溃时 Python 调用栈会写进 `agent-notes.out`。
+
 **PySide6 6.12.0 有缺陷**：每次发出 Qt 信号都会少计一次 `True` 的引用，累计几千次后进程以 `free(): invalid pointer` 崩溃
 （划词按钮每次点鼠标都会发信号，几分钟就会闪退）。`requirements.txt` 已排除该版本，旧环境重新运行一次 `./scripts/setup.sh` 即可换成 6.11.x；
 即使装的是 6.12.0，程序启动时也会检测并绕过（日志里有一条 WARNING）。
@@ -146,6 +151,8 @@ agent_notes/
   ui/          悬浮面板、批注弹窗、高亮层 overlay.py、划词按钮 bubble.py、提示、托盘、主题
   highlight.py 高亮控制：选哪些批注、轮询位置、遮挡裁剪、跳回原文
   ipc.py       命令行与运行中实例的通信（--status / --stop / 单实例）
+  helper.py    辅助进程：所有无障碍 / X 查询在这里执行，崩溃或卡死不影响主程序
+  worker.py    后台队列：把平台调用转给辅助进程，结果回到 Qt 主线程
   app.py       控制器：快捷键 → 采集 → 弹窗 → 存储 → 面板；拼装 → 填入
 tests/e2e/     端到端测试、不可见沙箱（sandbox.py、miniwm.py）
 spike/         M0 可行性验证脚本与结论（FINDINGS.md）

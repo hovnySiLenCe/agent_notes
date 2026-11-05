@@ -16,13 +16,14 @@ TERMINAL_CLASSES = {
 
 
 class X11Platform(Platform):
-    def __init__(self):
+    def __init__(self, own_pid: int | None = None):
+        self.own_pid = own_pid or os.getpid()
         self._tracker = None
 
     def _get_tracker(self):
         if self._tracker is None:
             from ..atspi.tracker import Tracker
-            self._tracker = Tracker(os.getpid())
+            self._tracker = Tracker(self.own_pid)
         return self._tracker
 
     def track(self, reqs: list[dict], focus: set[str]) -> dict:

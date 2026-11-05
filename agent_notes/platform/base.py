@@ -63,6 +63,13 @@ class Platform(ABC):
     @abstractmethod
     def accessibility_enabled(self) -> bool: ...
 
+    def late_anchor(self, win: WindowInfo, quote: str) -> dict | str | None:
+        """The app gave us only plain text: find it in the window's tree so highlights still work.
+        'inaccessible' when the app has no accessibility tree at all."""
+        if not self.app_accessible(win):
+            return 'inaccessible'
+        return self.anchor_from_text(win, quote)
+
     def anchor_from_text(self, win: WindowInfo, quote: str) -> dict | None:
         """worker: find a plain-text quote in `win` and return an anchor for it (None if not found)."""
         return None
@@ -79,6 +86,7 @@ class Platform(ABC):
         return True
 
 
-def get_platform() -> Platform:
+def get_platform(own_pid: int | None = None) -> Platform:
+    """own_pid: the process whose windows are "ours" (the helper process passes the main process's pid)."""
     from .x11 import X11Platform
-    return X11Platform()
+    return X11Platform(own_pid)

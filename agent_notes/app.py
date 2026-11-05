@@ -1,6 +1,7 @@
 """Controller: hotkey -> capture -> popup -> store -> panel, and panel/hotkey -> compose -> fill."""
 from __future__ import annotations
 
+import faulthandler
 import logging
 import os
 import signal
@@ -24,6 +25,7 @@ from .ui.panel import FloatingPanel, source_label
 from .ui.popup import AnnotatePopup
 from .ui.toast import Toast
 from .ui.tray import app_icon, make_tray
+from .helper import Helper
 from .worker import Worker
 
 log = logging.getLogger('agent_notes')
@@ -43,7 +45,7 @@ class Controller(QObject):
         super().__init__()
         self.app = app
         self.platform = get_platform()
-        self.worker = Worker()
+        self.worker = Worker(remote=self.platform, helper=Helper(os.getpid()))
         self.state = cfgmod.load_state()
         self.cfg, cfg_error = cfgmod.Config.load()
         self.store = Store(cfgmod.data_dir() / 'notes.db')
@@ -200,14 +202,8 @@ class Controller(QObject):
         self.toast.show_message(f'已添加批注 · {name}', 'ok', 1400, near=self.panel)
         self.worker.submit(self.platform.activate, ctx['win'].xid)   # hand focus back to where the user was
         if a.anchor.get('method') != 'atspi' and a.quote.strip():
-            self.worker.submit(self._late_anchor, ctx['win'], a.quote,
+            self.worker.submit(self.platform.late_anchor, ctx['win'], a.quote,
                                cb=lambda res, ann_id=a.id, win=ctx['win']: self._on_late_anchor(ann_id, win, res))
-
-    def _late_anchor(self, win: WindowInfo, quote: str):
-        """worker: the app gave us only plain text; find it in the window's tree so highlights still work."""
-        if not self.platform.app_accessible(win):
-            return 'inaccessible'
-        return self.platform.anchor_from_text(win, quote)
 
     def _on_late_anchor(self, ann_id: str, win: WindowInfo, res) -> None:
         if isinstance(res, dict):
@@ -410,6 +406,7 @@ class CommandServer(QObject):
 def run(argv: list[str], log_to_stderr: bool = True) -> int:
     """Start the GUI. The caller (__main__) has already made sure no other instance is running."""
     _setup_logging(log_to_stderr)
+    faulthandler.enable()          # a native crash leaves a Python stack in agent-notes.out
     qtfix.apply()
     app = QApplication(argv)
     app.setApplicationName('agent-notes')
