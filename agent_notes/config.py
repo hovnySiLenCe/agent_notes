@@ -46,6 +46,8 @@ DEFAULT_TYPES = [
      'template': '【给出代码】{{#quote}}「{{quote}}」{{/quote}}→ 请给出对应的代码示例{{#comment}}，要求：{{comment}}{{/comment}}'},
     {'id': 'keep', 'name': '保留', 'color': '#7C8594', 'hotkey': '', 'input': 'optional',
      'template': '【保留】{{#quote}}「{{quote}}」{{/quote}}→ 这部分很好，修改时请保留{{#comment}}（{{comment}}）{{/comment}}'},
+    {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'optional',
+     'template': '【忽略】{{#quote}}「{{quote}}」{{/quote}}→ 这部分不用管，后续回复中不必再处理或提及{{#comment}}（{{comment}}）{{/comment}}'},
 ]
 
 DEFAULTS = {
