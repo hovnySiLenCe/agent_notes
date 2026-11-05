@@ -25,6 +25,7 @@ class WM:
     def __init__(self):
         self.stack: list[int] = []        # bottom → top
         self.active = 0
+        self.deferred = 0                 # activation requested before the window became viewable
         catch = error.CatchError(error.BadAccess)
         root.change_attributes(event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask, onerror=catch)
         d.sync()
@@ -47,7 +48,8 @@ class WM:
         d.flush()
 
     def activate(self, xid: int, why: str = '') -> None:
-        if xid not in self.stack:
+        if xid not in self.stack:     # asked before its MapRequest arrived (e.g. a popup shown again)
+            self.deferred = xid
             return
         if os.environ.get('MINIWM_DEBUG'):
             print(f'[miniwm] activate {xid:#x} ({why})', file=sys.stderr, flush=True)
@@ -55,11 +57,19 @@ class WM:
         self.stack.append(xid)
         w = d.create_resource_object('window', xid)
         try:
-            w.configure(stack_mode=X.Above)
-            w.set_input_focus(X.RevertToPointerRoot, X.CurrentTime)
-            self.active = xid
+            viewable = w.get_attributes().map_state == X.IsViewable
         except error.XError:
-            pass
+            return
+        if not viewable:              # SetInputFocus would fail with BadMatch; focus it once it is mapped
+            self.deferred = xid
+            return
+        self.deferred = 0
+        catch = error.CatchError()
+        w.configure(stack_mode=X.Above, onerror=catch)
+        w.set_input_focus(X.RevertToPointerRoot, X.CurrentTime, onerror=catch)
+        d.sync()
+        if not catch.get_error():
+            self.active = xid
         self.publish()
 
     def forget(self, xid: int) -> None:
@@ -88,7 +98,7 @@ class WM:
                     e.window.change_attributes(event_mask=X.StructureNotifyMask)
                     if e.window.id not in self.stack:
                         self.stack.append(e.window.id)
-                    if self.wants_focus(e.window):
+                    if self.wants_focus(e.window) or e.window.id == self.deferred:
                         self.activate(e.window.id, 'mapped')
                     else:
                         self.publish()
@@ -101,6 +111,8 @@ class WM:
                         self.stack.append(e.window.id)
                         e.window.configure(stack_mode=X.Above)
                         self.publish()
+                elif e.type == X.MapNotify and e.window.id == self.deferred:
+                    self.activate(e.window.id, 'deferred until mapped')
                 elif e.type in (X.UnmapNotify, X.DestroyNotify):
                     self.forget(e.window.id)
                 elif e.type == X.ClientMessage and e.client_type == A('_NET_ACTIVE_WINDOW'):

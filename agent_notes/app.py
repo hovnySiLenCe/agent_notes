@@ -12,7 +12,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from . import config as cfgmod
-from . import ipc
+from . import ipc, qtfix
 from .core.composer import compose
 from .core.models import INPUT_NONE, SENT, Annotation
 from .core.store import Store
@@ -404,6 +404,7 @@ class CommandServer(QObject):
 def run(argv: list[str], log_to_stderr: bool = True) -> int:
     """Start the GUI. The caller (__main__) has already made sure no other instance is running."""
     _setup_logging(log_to_stderr)
+    qtfix.apply()
     app = QApplication(argv)
     app.setApplicationName('agent-notes')
     app.setQuitOnLastWindowClosed(False)

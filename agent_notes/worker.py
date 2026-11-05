@@ -29,7 +29,10 @@ class Worker(QObject):
                 log.exception('worker task %s failed', getattr(fn, '__name__', fn))
                 result = e
             self._done.emit(cb, result)
-        self._pool.submit(run)
+        try:
+            self._pool.submit(run)
+        except RuntimeError:         # shutting down: timers may still fire once
+            pass
 
     def _dispatch(self, cb, result) -> None:
         if cb is not None:

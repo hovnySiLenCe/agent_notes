@@ -6,7 +6,7 @@
 ## 安装
 
 ```bash
-./scripts/setup.sh      # 建 .venv（需系统 python3-gi / gir1.2-atspi-2.0），装 PySide6 + python-xlib
+./scripts/setup.sh      # 建 .venv（需系统 python3-gi / gir1.2-atspi-2.0），装 PySide6-Essentials + python-xlib
 ./run.sh                # 在后台启动后立即返回；关掉终端也不影响。已在运行时只唤出面板
 ```
 
@@ -20,6 +20,10 @@
 | `./run.sh --setup-firefox` | 为 Firefox 打开无障碍接口（重启 Firefox 后生效），用于精确定位与高亮 |
 
 后台运行的输出在 `~/.local/share/agent-notes/agent-notes.out`，日志在同目录 `agent-notes.log`。
+
+**PySide6 6.12.0 有缺陷**：每次发出 Qt 信号都会少计一次 `True` 的引用，累计几千次后进程以 `free(): invalid pointer` 崩溃
+（划词按钮每次点鼠标都会发信号，几分钟就会闪退）。`requirements.txt` 已排除该版本，旧环境重新运行一次 `./scripts/setup.sh` 即可换成 6.11.x；
+即使装的是 6.12.0，程序启动时也会检测并绕过（日志里有一条 WARNING）。
 
 前提：开启系统无障碍（用于精确读取选区、定位输入框），开启后**重启浏览器 / VS Code**：
 

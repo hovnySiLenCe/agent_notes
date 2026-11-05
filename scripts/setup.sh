@@ -9,6 +9,10 @@ if ! /usr/bin/python3 -c "import gi; gi.require_version('Atspi', '2.0')" 2>/dev/
     exit 1
 fi
 [ -d .venv ] || /usr/bin/python3 -m venv --system-site-packages .venv
+# Older setups installed the whole PySide6 bundle; only PySide6-Essentials is used (and 6.12.0 must go).
+if .venv/bin/pip show -q PySide6-Addons 2>/dev/null; then
+    .venv/bin/pip uninstall -y -q PySide6 PySide6-Addons PySide6-Pdf PySide6-WebEngine 2>/dev/null || true
+fi
 .venv/bin/pip install -q -r requirements.txt
 
 if ! ldconfig -p | grep -q 'libxcb-cursor.so.0'; then
