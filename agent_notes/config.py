@@ -32,30 +32,30 @@ def config_path() -> Path:
 
 
 DEFAULT_TYPES = [   # the menu shows 4 per row; order = keys 1-9, 0
-    # row 1 in the menu (and the selection bubble): react to what the agent said.
-    # Simple tags (同意 / 不同意 / 忽略 / 已解决 / 保留) use input 'none': picked = saved, no comment box.
-    {'id': 'agree', 'name': '同意', 'color': '#16A34A', 'hotkey': 'Shift+Alt+Y', 'input': 'none',
-     'template': '【同意】{{#quote}}「{{quote}}」{{/quote}}→ 同意这一点，按这个思路继续{{#comment}}（{{comment}}）{{/comment}}'},
-    {'id': 'disagree', 'name': '不同意', 'color': '#C2185B', 'hotkey': 'Shift+Alt+N', 'input': 'none',
-     'template': '【不同意】{{#quote}}「{{quote}}」{{/quote}}→ 我不同意这一点{{#comment}}：{{comment}}{{/comment}}，请重新考虑'},
-    {'id': 'ask', 'name': '追问', 'color': '#F5A623', 'hotkey': 'Shift+Alt+Q', 'input': 'required',
-     'template': '【追问】{{#quote}}「{{quote}}」{{/quote}}→ {{comment}}'},
+    # row 1 in the menu (and the selection bubble): one-click verdicts. Simple tags (YES / NO / 已解决 / 忽略 /
+    # 保留) use input 'none': picked = saved, no comment box.
+    {'id': 'agree', 'name': 'YES', 'color': '#16A34A', 'hotkey': 'Shift+Alt+Y', 'input': 'none',
+     'template': '【YES】{{#quote}}「{{quote}}」{{/quote}}→ 同意这一点，按这个思路继续{{#comment}}（{{comment}}）{{/comment}}'},
+    {'id': 'disagree', 'name': 'NO', 'color': '#C2185B', 'hotkey': 'Shift+Alt+N', 'input': 'none',
+     'template': '【NO】{{#quote}}「{{quote}}」{{/quote}}→ 我不同意这一点{{#comment}}：{{comment}}{{/comment}}，请重新考虑'},
+    {'id': 'solved', 'name': '已解决', 'color': '#64748B', 'hotkey': '', 'input': 'none',
+     'template': '【已解决】{{#quote}}「{{quote}}」{{/quote}}→ 这个问题已经解决了，不用再处理{{#comment}}（{{comment}}）{{/comment}}'},
+    {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'none',
+     'template': '【忽略】{{#quote}}「{{quote}}」{{/quote}}→ 这部分不用管，后续回复中不必再处理或提及{{#comment}}（{{comment}}）{{/comment}}'},
+    # row 2: remarks and corrections, ask for more
+    {'id': 'ask', 'name': 'REMARK', 'color': '#F5A623', 'hotkey': 'Shift+Alt+Q', 'input': 'required',
+     'template': '【REMARK】{{#quote}}「{{quote}}」{{/quote}}→ {{comment}}'},
     {'id': 'fix', 'name': '纠错', 'color': '#E5484D', 'hotkey': '', 'input': 'optional',
      'template': '【纠错】{{#quote}}「{{quote}}」{{/quote}}→ 这里可能有误{{#comment}}：{{comment}}{{/comment}}，请核实并修正'},
-    # row 2: ask for a rewrite
     {'id': 'expand', 'name': '展开', 'color': '#4C8BF5', 'hotkey': 'Shift+Alt+E', 'input': 'optional',
      'template': '【展开】{{#quote}}「{{quote}}」{{/quote}}→ 请更详细地解释这部分{{#comment}}，重点：{{comment}}{{/comment}}'},
     {'id': 'condense', 'name': '精简', 'color': '#6366F1', 'hotkey': 'Shift+Alt+W', 'input': 'optional',
      'template': '【精简】{{#quote}}「{{quote}}」{{/quote}}→ 这部分请压缩精简{{#comment}}，{{comment}}{{/comment}}'},
+    # row 3: other rewrites, keep
     {'id': 'example', 'name': '换个例子', 'color': '#8E4EC6', 'hotkey': '', 'input': 'optional',
      'template': '【换个例子】{{#quote}}「{{quote}}」{{/quote}}→ 请换一个更贴切的例子{{#comment}}（{{comment}}）{{/comment}}'},
     {'id': 'code', 'name': '给出代码', 'color': '#0EA5A4', 'hotkey': '', 'input': 'optional',
      'template': '【给出代码】{{#quote}}「{{quote}}」{{/quote}}→ 请给出对应的代码示例{{#comment}}，要求：{{comment}}{{/comment}}'},
-    # row 3: keep / drop
-    {'id': 'ignore', 'name': '忽略', 'color': '#A0785A', 'hotkey': '', 'input': 'none',
-     'template': '【忽略】{{#quote}}「{{quote}}」{{/quote}}→ 这部分不用管，后续回复中不必再处理或提及{{#comment}}（{{comment}}）{{/comment}}'},
-    {'id': 'solved', 'name': '已解决', 'color': '#64748B', 'hotkey': '', 'input': 'none',
-     'template': '【已解决】{{#quote}}「{{quote}}」{{/quote}}→ 这个问题已经解决了，不用再处理{{#comment}}（{{comment}}）{{/comment}}'},
     {'id': 'keep', 'name': '保留', 'color': '#84A63A', 'hotkey': '', 'input': 'none',
      'template': '【保留】{{#quote}}「{{quote}}」{{/quote}}→ 这部分很好，修改时请保留{{#comment}}（{{comment}}）{{/comment}}'},
 ]

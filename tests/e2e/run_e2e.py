@@ -310,7 +310,7 @@ def scenario_firefox(h: Harness) -> None:
     h.check('select quote 1 (AT-SPI)', h.select_text(pids, '防止梯度爆炸的技术'))
     h.annotate(xid, 'shift+alt+q', None, '为什么不用权重衰减？')
     h.check('select quote 2 (AT-SPI)', h.select_text(pids, 'learning rate warmup'))
-    h.annotate(xid, 'shift+alt+s', '5', None)                       # row 2, first: 展开
+    h.annotate(xid, 'shift+alt+s', '7', None)                       # row 2, third: 展开
     rows = sorted(h.db(), key=lambda r: r['created_at'])      # the panel lists newest first; the prompt is chronological
     if h.check('two annotations stored', len(rows) == 2, str(rows)):
         a, b = rows
@@ -321,7 +321,7 @@ def scenario_firefox(h: Harness) -> None:
                 and a['anchor'].get('suffix', '').startswith('。'), str(a['anchor']))
         h.check('ask: source window recorded', a['source'].get('xid') == xid and a['source'].get('wm_class'),
                 str(a['source']))
-        h.check('menu + digit 5 → expand', (b['type_id'], b['quote']) == ('expand', 'learning rate warmup'), str(b))
+        h.check('menu + digit 7 → expand', (b['type_id'], b['quote']) == ('expand', 'learning rate warmup'), str(b))
     panel = h.panel_xid()
     if panel:
         h.shot('firefox_panel', panel)
@@ -714,9 +714,9 @@ def scenario_bubble(h: Harness) -> None:
         return
     before = len(h.db())
     h.ensure_active(xid)
-    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: 同意 (agree, input none)
+    click(rect[0] + 18, rect[1] + rect[3] // 2)                   # first button: YES (agree, input none)
     saved = h.wait(lambda: len(h.db()) == before + 1, 3)
-    h.check('simple tag (同意) saved at once, no popup', saved and not h.app_active(), f'active {h.app_active()}')
+    h.check('simple tag (YES) saved at once, no popup', saved and not h.app_active(), f'active {h.app_active()}')
     h.check('…and the focus stays in the source window', windows.active_xid() == xid)
     rows = sorted(h.db(), key=lambda r: r['created_at'])
     if rows:
@@ -735,7 +735,7 @@ def scenario_bubble(h: Harness) -> None:
     if not h.check('click ⋯ → popup opens', popup):
         return
     h.shot('bubble_popup', popup)
-    h.key('5', popup)                                            # 展开 (optional comment)
+    h.key('7', popup)                                            # 展开 (optional comment)
     h.pump(0.2)
     h.key('Return', popup)
     saved = h.wait(lambda: len(h.db()) == before + 1, 3)

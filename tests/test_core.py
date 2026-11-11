@@ -38,7 +38,7 @@ class ComposerTest(unittest.TestCase):
         self.assertEqual(out.splitlines(), [
             '请根据以下批注，修改或补充你上一条回复：',
             '1. 【展开】「防止梯度爆炸的技术」→ 请更详细地解释这部分',
-            '2. 【追问】「clip_grad_norm_」→ 为什么不用权重衰减？',
+            '2. 【REMARK】「clip_grad_norm_」→ 为什么不用权重衰减？',
             '3. 【精简】「一大段 废话」→ 这部分请压缩精简',
         ])
 
