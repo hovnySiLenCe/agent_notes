@@ -5,19 +5,24 @@ import time
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPropertyAnimation, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QDrag, QGuiApplication, QPainter, QPalette
+from PySide6.QtGui import QColor, QCursor, QDrag, QGuiApplication, QIcon, QPainter
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
                                QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
                                QSizeGrip, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.models import PENDING, RESOLVED, SENT, Annotation, AnnoType
-from .theme import C
+from .icons import icon, pixmap
+from .theme import C, add_shadow, margin, quote_block, rgba, type_tag_style
 
 if TYPE_CHECKING:
     from ..app import Controller
 
 MIME = 'application/x-marginalia-id'
-MIN_SIZE = (300, 160)          # expanded panel: room for the header and at least one card
+MIN_SIZE = (300, 160)          # expanded panel's frame: room for the header and at least one card
+
+
+def min_size() -> tuple[int, int]:
+    return MIN_SIZE[0] + 2 * margin(), MIN_SIZE[1] + 2 * margin()
 APP_NAMES = {'firefox': 'Firefox', 'firefox_firefox': 'Firefox', 'code': 'VS Code', 'google-chrome': 'Chrome', 'chromium': 'Chromium',
              'chromium-browser': 'Chromium', 'gnome-terminal-server': '终端', 'cursor': 'Cursor'}
 
@@ -51,21 +56,17 @@ class Card(QFrame):
         self.ann, self.panel = ann, panel
         self._press: QPoint | None = None
         self.setProperty('sent', ann.status != PENDING)        # dimmed: already sent or resolved
-        self.setStyleSheet(f'QFrame#card {{ border-left: 3px solid {atype.color}; }}')
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 7, 10, 8)
-        lay.setSpacing(4)
+        lay.setContentsMargins(10, 8, 8, 10)
+        lay.setSpacing(6)
         top = QHBoxLayout()
-        top.setSpacing(6)
+        top.setSpacing(7)
         self.check = QCheckBox()
-        pal = self.check.palette()
-        pal.setColor(QPalette.Base, QColor(C['check_base']))
-        self.check.setPalette(pal)
         self.check.setChecked(ann.checked)
-        self.check.setToolTip('勾选后会再次填入' if ann.status == SENT else '')
+        self.check.setToolTip('勾选后会再次填入' if ann.status == SENT else '勾选的批注会被填入')
         self.check.toggled.connect(lambda on: panel.ctl.store.update(ann.id, checked=on))
         name = QLabel(atype.name)
-        name.setStyleSheet(f'color: {atype.color}; font-weight: 600;')
+        name.setStyleSheet(type_tag_style(atype.color))
         src = QLabel(_elide(app_label(ann.source), 18), objectName='faint')
         src.setToolTip(source_label(ann.source, 200))
         top.addWidget(self.check)
@@ -80,30 +81,31 @@ class Card(QFrame):
         self.loc = QLabel('', objectName='locState')      # where the quote is in its window right now
         self.loc.hide()
         top.addWidget(self.loc)
-        self.jump_btn = self._hover_button('⌖', '跳到原文（双击卡片也可以）', lambda: panel.jump(ann))
+        self.jump_btn = self._hover_button('target', '跳到原文（双击卡片也可以）', lambda: panel.jump(ann))
         if ann.status == RESOLVED:
-            self.done_btn = self._hover_button('↺', '重新打开（改回待发送）', lambda: panel.set_status(ann, PENDING))
+            self.done_btn = self._hover_button('undo', '重新打开（改回待发送）', lambda: panel.set_status(ann, PENDING))
         else:
-            self.done_btn = self._hover_button('✓', '标记为已解决（不再填入，原文不再高亮）',
+            self.done_btn = self._hover_button('check', '标记为已解决（不再填入，原文不再高亮）',
                                                lambda: panel.set_status(ann, RESOLVED))
-        self.del_btn = self._hover_button('✕', '删除这条批注', lambda: panel.ctl.store.delete([ann.id]))
+        self.del_btn = self._hover_button('close', '删除这条批注', lambda: panel.ctl.store.delete([ann.id]))
         top.addWidget(self.jump_btn)
         top.addWidget(self.done_btn)
         top.addWidget(self.del_btn)
         lay.addLayout(top)
         if ann.quote.strip():
-            q = QLabel(f'「{_elide(ann.quote, 150)}」', objectName='quote')
+            q = QLabel(_elide(ann.quote, 150), objectName='quote')
             q.setWordWrap(True)
             q.setToolTip(ann.quote[:2000])
-            lay.addWidget(q)
+            lay.addWidget(quote_block(q, rgba(atype.color, 150) if ann.status == PENDING else C['border_strong']))
         if ann.comment.strip():
             c = QLabel(ann.comment.strip(), objectName='comment')
             c.setWordWrap(True)
             lay.addWidget(c)
 
-    def _hover_button(self, text: str, tip: str, slot) -> QToolButton:
-        b = QToolButton(objectName='cardDelete' if text == '✕' else 'cardAction')
-        b.setText(text)
+    def _hover_button(self, name: str, tip: str, slot) -> QToolButton:
+        b = QToolButton(objectName='cardDelete' if name == 'close' else 'cardAction')
+        hover = C['danger'] if name == 'close' else C['text']
+        b.setIcon(icon(name, C['faint'], hover, 14))
         b.setToolTip(tip)
         b.setCursor(Qt.PointingHandCursor)
         b.clicked.connect(slot)
@@ -282,7 +284,7 @@ class FloatingPanel(QWidget):
         self.setWindowTitle('Marginalia')
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setMinimumSize(*MIN_SIZE)
+        self.setMinimumSize(*min_size())
         self._collapsed = False
         self._pinned = bool(ctl.state.get('panel', {}).get('pinned', False))
         self._expanded_geo = QRect()
@@ -292,8 +294,9 @@ class FloatingPanel(QWidget):
         self._save_timer = QTimer(self, singleShot=True, interval=600, timeout=self._save_geometry)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setContentsMargins(margin(), margin(), margin(), margin())
         frame = QFrame(objectName='panel')
+        add_shadow(frame)
         outer.addWidget(frame)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -303,13 +306,20 @@ class FloatingPanel(QWidget):
         self._header = QWidget()
         self._header.setCursor(Qt.SizeAllCursor)
         hl = QHBoxLayout(self._header)
-        hl.setContentsMargins(12, 8, 6, 6)
+        hl.setContentsMargins(12, 8, 6, 8)
+        hl.setSpacing(4)
+        logo = QLabel()
+        logo.setPixmap(pixmap('note', C['accent'], 16))
         self._title = QLabel('批注', objectName='title')
-        self._count = QLabel('', objectName='faint')
+        self._count = QLabel('', objectName='countPill')
+        self._count.hide()
+        hl.addWidget(logo)
+        hl.addSpacing(2)
         hl.addWidget(self._title)
+        hl.addSpacing(4)
         hl.addWidget(self._count)
         hl.addStretch(1)
-        self._menu_btn = self._tool('⋯', '菜单')
+        self._menu_btn = self._tool('more', '菜单')
         self._menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu = QMenu(self)
         self._hl_action = menu.addAction('在原文上显示高亮')
@@ -325,16 +335,16 @@ class FloatingPanel(QWidget):
         menu.addSeparator()
         menu.addAction('退出', ctl.quit)
         self._menu_btn.setMenu(menu)
-        self._trash_btn = self._tool('🗑', '删除 / 清空')
+        self._trash_btn = self._tool('trash', '删除 / 清空')
         self._trash_btn.setPopupMode(QToolButton.InstantPopup)
         self._trash_menu = QMenu(self)
         self._trash_menu.aboutToShow.connect(self._fill_trash_menu)
         self._trash_btn.setMenu(self._trash_menu)
-        self._pin_btn = self._tool('📌', '固定展开：鼠标离开后不自动收起')
+        self._pin_btn = self._tool('pin', '固定展开：鼠标离开后不自动收起')
         self._pin_btn.setCheckable(True)
         self._pin_btn.setChecked(self._pinned)
         self._pin_btn.toggled.connect(self.set_pinned)
-        self._close_btn = self._tool('✕', '隐藏')
+        self._close_btn = self._tool('close', '隐藏')
         self._close_btn.clicked.connect(self.hide)
         for b in (self._trash_btn, self._menu_btn, self._pin_btn, self._close_btn):
             hl.addWidget(b)
@@ -346,7 +356,7 @@ class FloatingPanel(QWidget):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(6)
         fl = QHBoxLayout()
-        fl.setContentsMargins(10, 0, 10, 0)
+        fl.setContentsMargins(10, 0, 10, 2)
         self._filter_box = QComboBox()
         self._filter_box.currentIndexChanged.connect(self._on_filter)
         fl.addWidget(self._filter_box, 1)
@@ -365,8 +375,8 @@ class FloatingPanel(QWidget):
         pvl.setSpacing(4)
         modes = QHBoxLayout()
         modes.addWidget(QLabel('将要填入：', objectName='faint'))
-        self._pv_full = self._tool('完整', '与「填入」相同：提示语 + 每条批注的类型说明')
-        self._pv_plain = self._tool('仅引用', '与「仅引用」相同：只有引用和批注')
+        self._pv_full = self._segment('完整', '与「填入」相同：提示语 + 每条批注的类型说明')
+        self._pv_plain = self._segment('仅引用', '与「仅引用」相同：只有引用和批注')
         for b in (self._pv_full, self._pv_plain):
             b.setCheckable(True)
             b.clicked.connect(lambda _=False, plain=b is self._pv_plain: self._set_preview_mode(plain))
@@ -383,7 +393,8 @@ class FloatingPanel(QWidget):
         self._set_preview_mode(False)
         bl.addWidget(self._preview_box)
         foot = QHBoxLayout()
-        foot.setContentsMargins(10, 2, 4, 8)
+        foot.setContentsMargins(10, 4, 4, 8)
+        foot.setSpacing(6)
         self._preview_btn = QPushButton('预览')
         self._preview_btn.setCheckable(True)
         self._preview_btn.toggled.connect(self._toggle_preview)
@@ -407,11 +418,21 @@ class FloatingPanel(QWidget):
         self.update_opacity(animate=False)
         self._restore_geometry()
 
-    def _tool(self, text: str, tip: str) -> QToolButton:
+    def _tool(self, name: str, tip: str) -> QToolButton:
         b = QToolButton()
-        b.setText(text)
+        ic = icon(name, C['muted'], C['text'])
+        if name == 'pin':                         # checked = pinned: drawn in the accent color
+            ic.addPixmap(pixmap(name, C['accent']), QIcon.Normal, QIcon.On)
+            ic.addPixmap(pixmap(name, C['accent']), QIcon.Active, QIcon.On)
+        b.setIcon(ic)
         b.setToolTip(tip)
         b.setCursor(Qt.ArrowCursor)
+        return b
+
+    def _segment(self, text: str, tip: str) -> QToolButton:
+        b = QToolButton(objectName='segment')
+        b.setText(text)
+        b.setToolTip(tip)
         return b
 
     # ---- data ---------------------------------------------------------------------------------------------
@@ -441,14 +462,25 @@ class FloatingPanel(QWidget):
         empty = None
         if not cards:
             hk = self.ctl.cfg.data['hotkeys'].get('menu') or '快捷键'
-            empty = QLabel(f'在任意 Agent 窗口中选中文字，\n按 {hk} 添加批注', objectName='empty')
-            empty.setAlignment(Qt.AlignCenter)
+            empty = QWidget()
+            el = QVBoxLayout(empty)
+            el.setContentsMargins(0, 28, 0, 0)
+            pic = QLabel()
+            pic.setPixmap(pixmap('note', C['faint'], 28))
+            pic.setAlignment(Qt.AlignCenter)
+            text = QLabel(f'在任意 Agent 窗口中选中文字，\n按 {hk} 或点划词按钮添加批注', objectName='empty')
+            text.setAlignment(Qt.AlignCenter)
+            el.addWidget(pic)
+            el.addWidget(text)
         self._list.set_widgets(cards, empty)
         self.update_locate_states()
         toggle = self.ctl.cfg.data['hotkeys'].get('toggle_panel')
         self._close_btn.setToolTip(f'隐藏（{toggle} 重新显示）' if toggle else '隐藏')
         pending = sum(a.status == PENDING for a in items)
-        self._count.setText(f'{pending} 条待发送' if pending else '')
+        self._count.setText(f'{pending} 条待发送')
+        self._count.setVisible(bool(pending))
+        if self._collapsed:
+            self._fit_bar()
         n = len(self.fill_items(items))
         hk = self.ctl.cfg.data['hotkeys']
         fill_key = f"  {short_hotkey(hk['fill'])}" if hk.get('fill') else ''
@@ -618,12 +650,9 @@ class FloatingPanel(QWidget):
             self._expanded_geo = self.geometry()
             self._body.hide()
             self.setMinimumSize(0, 0)
-            w = max(self._header.sizeHint().width() + 8, 200)
-            h = self._header.sizeHint().height() + 2
-            self.setFixedSize(w, h)
-            self.move(self._expanded_geo.right() - w + 1, self._expanded_geo.y())   # keep the right edge
+            self._fit_bar()
         else:
-            self.setMinimumSize(*MIN_SIZE)
+            self.setMinimumSize(*min_size())
             self.setMaximumSize(16777215, 16777215)
             self._body.show()
             self.setGeometry(self._expanded_geo)
@@ -635,6 +664,14 @@ class FloatingPanel(QWidget):
         self._collapsed = on
         self.update_opacity(animate=False)
         self._save_timer.start()
+
+    def _fit_bar(self) -> None:
+        """Size the collapsed bar to its header (the count in it changes), keeping the panel's right edge."""
+        self._header.layout().activate()
+        w = max(self._header.sizeHint().width() + 8, 200) + 2 * margin()
+        h = self._header.sizeHint().height() + 2 + 2 * margin()
+        self.setFixedSize(w, h)
+        self.move(self._expanded_geo.right() - w + 1, self._expanded_geo.y())
 
     def _settle(self) -> None:
         if not self._collapsed and self.size() != self._expanded_geo.size():
@@ -706,14 +743,17 @@ class FloatingPanel(QWidget):
     def toggle(self) -> None:
         self.hide() if self.isVisible() else self.show_panel()
 
+    def _on_header(self, e) -> bool:
+        return self._header.rect().contains(self._header.mapFrom(self, e.position().toPoint()))
+
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.LeftButton and self._header.geometry().contains(e.position().toPoint()):
+        if e.button() == Qt.LeftButton and self._on_header(e):
             if self.windowHandle() and self.windowHandle().startSystemMove():
                 return
         super().mousePressEvent(e)
 
     def mouseDoubleClickEvent(self, e) -> None:
-        if self._header.geometry().contains(e.position().toPoint()):
+        if self._on_header(e):
             self.set_pinned(not self._pinned)
 
     def moveEvent(self, e) -> None:
@@ -732,7 +772,7 @@ class FloatingPanel(QWidget):
         st = self.ctl.state.get('panel', {})
         screen = QGuiApplication.primaryScreen().availableGeometry()
         w, h = st.get('w', 380), st.get('h', 560)
-        if w < MIN_SIZE[0] or h < MIN_SIZE[1]:      # a broken saved size would hide the list
+        if w < min_size()[0] or h < min_size()[1]:  # a broken saved size would hide the list
             w, h = max(w, 380), 560
         x, y = st.get('x', screen.right() - w - 24), st.get('y', screen.top() + 120)
         if not screen.intersects(QRect(x, y, w, h)):

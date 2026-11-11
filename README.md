@@ -3,6 +3,12 @@
 像在书页边上写眉批一样，给任意 Agent 输出（网页、VS Code、桌面应用、终端 CLI）加批注的独立桌面程序（Linux X11）。
 选中文字 → 快捷键 → 选类型/写说明 → 批注进入桌面悬浮面板，原文上出现高亮 → 一键拼成 prompt 填回 Agent 输入框。
 
+<p>
+  <img src="docs/screenshots/panel.png" width="300" alt="悬浮面板">
+  <img src="docs/screenshots/popup.png" width="420" alt="批注弹窗">
+</p>
+<p><img src="docs/screenshots/bubble.png" alt="划词按钮"></p>
+
 ## 安装
 
 ```bash

@@ -414,7 +414,12 @@ def run(argv: list[str], log_to_stderr: bool = True) -> int:
     app.setApplicationName('marginalia')
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
-    theme.apply(app)
+    try:
+        from .platform.x11.windows import compositing
+        composited = compositing()
+    except Exception:
+        composited = True
+    theme.apply(app, composited)
 
     ctl = Controller(app)
     server = CommandServer(ctl)

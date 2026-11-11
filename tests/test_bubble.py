@@ -24,7 +24,8 @@ class BubbleTest(unittest.TestCase):
         types = [AnnoType('expand', '展开', hotkey='Shift+Alt+E'), AnnoType('ask', '追问')]
         b.set_types(types, {'expand': 'Shift+Alt+E', '': 'Shift+Alt+S'})
         buttons = b.findChildren(QToolButton)
-        self.assertEqual([x.text() for x in buttons], ['展开', '追问', '⋯'])
+        self.assertEqual([x.text() for x in buttons], ['展开', '追问', ''])     # (the last one: an icon)
+        self.assertIn('批注菜单', buttons[2].toolTip())
         self.assertIn('Shift+Alt+E', buttons[0].toolTip())
         got = []
         b.chosen.connect(got.append)

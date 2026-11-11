@@ -9,11 +9,11 @@ from typing import Callable
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QKeyEvent
-from PySide6.QtWidgets import (QFrame, QGridLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+                               QVBoxLayout, QWidget)
 
 from ..core.models import INPUT_NONE, INPUT_REQUIRED, AnnoType
-from .theme import chip_style
+from .theme import C, add_shadow, chip_style, margin, quote_block
 
 MAX_TYPES = 12
 KEYS = '1234567890'        # type i is picked with KEYS[i]; later ones with the arrows
@@ -25,6 +25,28 @@ def _elide(text: str, n: int) -> str:
     return t if len(t) <= n else t[:n - 1] + '…'
 
 
+def hint(*parts: tuple[str, str]) -> str:
+    """'Enter 保存 · Esc 取消' with the keys standing out: hint(('Enter', '保存'), ('Esc', '取消'))."""
+    return ' &nbsp;·&nbsp; '.join(f'<span style="color:{C["muted"]}; font-weight:600">{k}</span> {w}' for k, w in parts)
+
+
+class Chip(QPushButton):
+    """A type button: its digit key, small and dim, then the type's name."""
+
+    def __init__(self, key: str, name: str):
+        super().__init__(objectName='chip')
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 0, 10, 0)
+        lay.setSpacing(6)
+        lay.addStretch(1)
+        for text, obj in ((key, 'chipKey'), (name, 'chipName')):
+            if text:
+                lab = QLabel(text, objectName=obj)
+                lab.setAttribute(Qt.WA_TransparentForMouseEvents)
+                lay.addWidget(lab)
+        lay.addStretch(1)
+
+
 class AnnotatePopup(QWidget):
     submitted = Signal(str, str)   # type_id, comment
     cancelled = Signal()
@@ -34,29 +56,32 @@ class AnnotatePopup(QWidget):
         self._activator = activator
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setFixedWidth(460)
+        self.setFixedWidth(480 + 2 * margin())
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setContentsMargins(margin(), margin(), margin(), margin())
         frame = QFrame(objectName='popup')
+        add_shadow(frame)
         outer.addWidget(frame)
         lay = self._lay = QVBoxLayout(frame)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(16, 13, 16, 12)
+        lay.setSpacing(10)
         self._source = QLabel(objectName='faint')
-        self._quote = QLabel(objectName='quote')
+        self._quote = QLabel(objectName='popupQuote')
         self._quote.setWordWrap(True)
         self._chips_box = QWidget()
         self._chips = QGridLayout(self._chips_box)
         self._chips.setContentsMargins(0, 2, 0, 2)
-        self._chips.setHorizontalSpacing(6)
-        self._chips.setVerticalSpacing(6)
+        self._chips.setHorizontalSpacing(7)
+        self._chips.setVerticalSpacing(7)
         self._input = QPlainTextEdit()
-        self._input.setFixedHeight(68)
+        self._input.setFixedHeight(72)
         self._input.installEventFilter(self)
         self._error = QLabel(objectName='error')
         self._error.hide()
-        self._hint = QLabel(objectName='faint')
-        for w in (self._source, self._quote, self._chips_box, self._input, self._error, self._hint):
+        self._hint = QLabel(objectName='hint')
+        self._hint.setTextFormat(Qt.RichText)
+        self._quote_box = quote_block(self._quote, C['accent'])
+        for w in (self._source, self._quote_box, self._chips_box, self._input, self._error, self._hint):
             lay.addWidget(w)
         self._types: list[AnnoType] = []
         self._buttons: list[QPushButton] = []
@@ -71,7 +96,7 @@ class AnnotatePopup(QWidget):
         self._types = types[:MAX_TYPES]
         self._has_quote = bool(quote.strip())
         self._source.setText(source_label)
-        self._quote.setText(f'「{_elide(quote, 140)}」' if self._has_quote
+        self._quote.setText(_elide(quote, 140) if self._has_quote
                             else '未检测到选中文本，将保存为一条独立备注（需要填写内容）')
         self._build_chips()
         self._input.clear()
@@ -86,8 +111,8 @@ class AnnotatePopup(QWidget):
             self._stage = 'type'
         self._refresh()
         screen = (QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()).availableGeometry()
-        x = min(pos.x() + 12, screen.right() - self.width() - 8)
-        y = pos.y() + 18
+        x = min(pos.x() + 12 - margin(), screen.right() - self.width() - 8)
+        y = pos.y() + 18 - margin()
         if y + self.height() > screen.bottom() - 8:
             y = pos.y() - self.height() - 12
         self.move(max(screen.left() + 8, x), max(screen.top() + 8, y))
@@ -110,7 +135,7 @@ class AnnotatePopup(QWidget):
             b.deleteLater()
         self._buttons = []
         for i, t in enumerate(self._types):
-            b = QPushButton(f'{KEYS[i]}  {t.name}' if i < len(KEYS) else t.name)
+            b = Chip(KEYS[i] if i < len(KEYS) else '', t.name)
             b.setFocusPolicy(Qt.NoFocus)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, tid=t.id: self._choose(tid))
@@ -130,9 +155,10 @@ class AnnotatePopup(QWidget):
         if comment_stage:
             required = t.input == INPUT_REQUIRED or not self._has_quote
             self._input.setPlaceholderText(f'输入{t.name}内容…' if required else f'{t.name}：补充说明（可选）')
-            self._hint.setText('Enter 保存 · Shift+Enter 换行 · Tab 换类型 · Esc 取消')
+            self._hint.setText(hint(('Enter', '保存'), ('Shift+Enter', '换行'), ('Tab', '换类型'), ('Esc', '取消')))
         else:
-            self._hint.setText(f'按 1-{KEYS[min(len(self._types), len(KEYS)) - 1]} 或 ←→ + Enter 选择类型 · Esc 取消')
+            last = KEYS[min(len(self._types), len(KEYS)) - 1]
+            self._hint.setText(hint((f'1–{last}', '或'), ('←→ Enter', '选择类型'), ('Esc', '取消')))
         self._fit()
 
     def _fit(self) -> None:

@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from .theme import C
+from .theme import C, add_shadow, margin
 
-_KIND_COLOR = {'info': C['accent'], 'ok': '#22A06B', 'warn': '#F5A623', 'error': C['danger']}
+_KIND_COLOR = {'info': C['accent'], 'ok': C['ok'], 'warn': C['warn'], 'error': C['danger']}
 
 
 class Toast(QWidget):
@@ -17,10 +17,15 @@ class Toast(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(margin(), margin(), margin(), margin())
         self._frame = QFrame(objectName='toast')
-        inner = QVBoxLayout(self._frame)
-        inner.setContentsMargins(14, 8, 14, 8)
+        add_shadow(self._frame)
+        inner = QHBoxLayout(self._frame)
+        inner.setContentsMargins(12, 9, 14, 9)
+        inner.setSpacing(9)
+        self._dot = QLabel()
+        self._dot.setFixedSize(8, 8)
+        inner.addWidget(self._dot, 0, Qt.AlignTop)
         self._label = QLabel()
         self._label.setWordWrap(True)
         self._label.setMaximumWidth(420)
@@ -29,7 +34,9 @@ class Toast(QWidget):
         self._timer = QTimer(self, singleShot=True, timeout=self.hide)
 
     def show_message(self, text: str, kind: str = 'info', ms: int = 2200, near: QWidget | None = None) -> None:
-        self._frame.setStyleSheet(f'QFrame#toast {{ border-left: 3px solid {_KIND_COLOR.get(kind, C["accent"])}; }}')
+        self._dot.setStyleSheet(f'background: {_KIND_COLOR.get(kind, C["accent"])}; border-radius: 4px;'
+                                f' margin-top: 6px;')
+        self._dot.setFixedSize(8, 14)
         self._label.setText(text)
         self.adjustSize()
         if near is not None and near.isVisible():

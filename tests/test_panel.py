@@ -129,7 +129,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertEqual((st.get(a.id).status, st.get(a.id).checked), (RESOLVED, False))
         self.panel.refresh()
         card = self.panel._list._cards[0]
-        self.assertEqual(card.done_btn.text(), '↺')
+        self.assertTrue(card.done_btn.toolTip().startswith('重新打开'))
         self.assertEqual(self.panel.fill_items(st.all()), [])   # resolved items are not filled
         card.done_btn.click()                                    # reopen
         self.assertEqual((st.get(a.id).status, st.get(a.id).checked), (PENDING, True))

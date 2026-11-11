@@ -5,12 +5,27 @@ so the normal capture path (the same as pressing the type's hotkey) reads the se
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
 
 from ..core.models import AnnoType
-from .theme import C
+from .icons import icon
+from .theme import C, add_shadow, margin
+
+
+def _dot(color: str, size: int = 8) -> QIcon:
+    dpr = QGuiApplication.instance().devicePixelRatio() if QGuiApplication.instance() else 1.0
+    pm = QPixmap(round(size * dpr), round(size * dpr))
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    p.drawEllipse(0, 0, pm.width(), pm.height())
+    p.end()
+    pm.setDevicePixelRatio(dpr)
+    return QIcon(pm)
 
 
 class SelectionBubble(QWidget):
@@ -23,11 +38,12 @@ class SelectionBubble(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle('Marginalia bubble')
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(margin(), margin(), margin(), margin())
         self._frame = QFrame(objectName='bubble')
+        add_shadow(self._frame)
         self._row = QHBoxLayout(self._frame)
-        self._row.setContentsMargins(4, 3, 4, 3)
-        self._row.setSpacing(2)
+        self._row.setContentsMargins(4, 4, 4, 4)
+        self._row.setSpacing(1)
         lay.addWidget(self._frame)
         self._timer = QTimer(self, singleShot=True, timeout=self.hide)
         self.timeout_ms = 3500
@@ -45,8 +61,11 @@ class SelectionBubble(QWidget):
         for t in types:
             tip = f'添加「{t.name}」批注' + (f'（{hotkeys[t.id]}）' if hotkeys.get(t.id) else '')
             self._row.addWidget(self._button(t.name, tip, t.id, t.color))
-        self._row.addWidget(self._button('⋯', '批注菜单：选类型、写说明' + (f'（{hotkeys[""]}）' if hotkeys.get('') else ''),
-                                         '', C['muted']))
+        more = self._button('', '批注菜单：选类型、写说明' + (f'（{hotkeys[""]}）' if hotkeys.get('') else ''),
+                            '', C['muted'])
+        more.setIcon(icon('more', C['muted'], C['text']))
+        more.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._row.addWidget(more)
         self.adjustSize()
 
     def _button(self, text: str, tip: str, type_id: str, color: str) -> QToolButton:
@@ -55,7 +74,11 @@ class SelectionBubble(QWidget):
         b.setToolTip(tip)
         b.setCursor(Qt.PointingHandCursor)
         b.setFocusPolicy(Qt.NoFocus)
-        b.setStyleSheet(f'QToolButton#bubbleButton {{ color: {color}; }}')
+        if text:
+            b.setIcon(_dot(color))
+            b.setIconSize(QSize(8, 8))
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        b.setStyleSheet(f'QToolButton#bubbleButton {{ color: {C["text"]}; }}')
         b.clicked.connect(lambda: self._choose(type_id))
         return b
 
@@ -67,7 +90,7 @@ class SelectionBubble(QWidget):
         pos = QCursor.pos() if pos is None else pos
         self.adjustSize()
         screen = (QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()).availableGeometry()
-        x, y = pos.x() + 10, pos.y() + 18
+        x, y = pos.x() + 10 - margin(), pos.y() + 18 - margin()
         if y + self.height() > screen.bottom():
             y = pos.y() - self.height() - 12
         self.move(max(screen.left() + 4, min(x, screen.right() - self.width() - 4)), y)

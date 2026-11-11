@@ -105,7 +105,7 @@ DEFAULTS = {
                'plain_template': '{{#quote}}「{{quote}}」{{/quote}}{{#comment}} {{comment}}{{/comment}}'},
     'fill': {'mode': 'fill', 'target': 'source', 'auto_send': False, 'mark_sent': True},
     'panel': {'auto_collapse': True, 'expand_distance': 40, 'idle_opacity': 0.5, 'opacity': 0.96},
-    'popup': {'opacity': 0.9},
+    'popup': {'opacity': 0.97},
     'highlight': {'enabled': True, 'show': 'pending'},
     'bubble': {'enabled': True, 'types': 4, 'timeout_ms': 3500},
 }
