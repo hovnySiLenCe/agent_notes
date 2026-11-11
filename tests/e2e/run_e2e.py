@@ -281,8 +281,8 @@ class Harness:
 
 # ---- scenarios ----------------------------------------------------------------------------------------------
 def open_firefox(h: Harness, profile: str) -> tuple[int | None, set[int]]:
-    prof = WORK / 'profiles' / profile
-    prof.mkdir(parents=True, exist_ok=True)
+    prof = h.run_dir / 'profiles' / profile     # fresh every run: a profile reused after an unclean exit (or by
+    prof.mkdir(parents=True, exist_ok=True)       # the sandbox and the real desktop in turn) may never open a window
     (prof / 'user.js').write_text('\n'.join([
         'user_pref("gfx.webrender.software", true);', 'user_pref("layers.acceleration.disabled", true);',
         'user_pref("media.hardware-video-decoding.enabled", false);',
@@ -407,22 +407,9 @@ def scenario_terminal(h: Harness) -> None:
 
 def scenario_vscode(h: Harness) -> None:
     print('[vscode] markdown preview webview + Copilot Chat input')
-    ud, ext = WORK / 'profiles' / 'vscode-ud', WORK / 'profiles' / 'vscode-ext'
-    (ud / 'User').mkdir(parents=True, exist_ok=True)
-    ext.mkdir(parents=True, exist_ok=True)
-    (ud / 'User' / 'settings.json').write_text(json.dumps({
-        'workbench.editorAssociations': {'*.md': 'vscode.markdown.preview.editor'},
-        'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': False,
-        'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'window.restoreWindows': 'none'}))
-    proc = subprocess.Popen(['nice', '-n', '19', '/usr/share/code/code', f'--user-data-dir={ud}',
-                             f'--extensions-dir={ext}', '--disable-gpu', '--force-renderer-accessibility',
-                             '--new-window', str(FIX / 'reply.md')],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    h.cleanups.append(lambda: (h.kill_matching(str(ud)), proc.terminate()))
-    xid = h.wait(lambda: next(iter(h.windows_of(h.pids_matching(str(ud)) | {proc.pid})), None), 40)
+    xid, pids = _open_vscode(h, FIX / 'reply.md')
     if not h.check('vscode window appears', xid):
         return
-    pids = h.pids_matching(str(ud)) | {proc.pid}
     h.pump(4)
     _vscode_dismiss_dialogs(pids)
     if h.find_entry(pids, 'Chat Input') is None:
@@ -441,6 +428,131 @@ def scenario_vscode(h: Harness) -> None:
     got = h.wait(lambda: T.get_text(chat, 0, T.get_character_count(chat)).strip(), 6)
     h.check('fill: chat input receives the composed prompt', got == expected, f'got={got!r}\nexpected={expected!r}')
     h.shot('vscode_after_fill', xid)
+
+
+SCROLL_QUOTE = '滚动跟随测试的目标句子'
+
+
+def _open_vscode(h: Harness, doc: Path):
+    ud, ext = WORK / 'profiles' / 'vscode-ud', WORK / 'profiles' / 'vscode-ext'
+    (ud / 'User').mkdir(parents=True, exist_ok=True)
+    ext.mkdir(parents=True, exist_ok=True)
+    (ud / 'User' / 'settings.json').write_text(json.dumps({
+        'workbench.editorAssociations': {'*.md': 'vscode.markdown.preview.editor'},
+        'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': False,
+        'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'window.restoreWindows': 'none'}))
+    proc = subprocess.Popen(['nice', '-n', '19', '/usr/share/code/code', f'--user-data-dir={ud}',
+                             f'--extensions-dir={ext}', '--disable-gpu', '--force-renderer-accessibility',
+                             '--new-window', str(doc)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    h.cleanups.append(lambda: (h.kill_matching(str(ud)), proc.terminate()))
+    xid = h.wait(lambda: next(iter(h.windows_of(h.pids_matching(str(ud)) | {proc.pid})), None), 40)
+    pids = h.pids_matching(str(ud)) | {proc.pid}
+    return xid, pids
+
+
+def _gray(xid: int, rect) -> 'np.ndarray | None':
+    """Window-relative rect of the window's own image, gray."""
+    import numpy as np
+    try:
+        img = xd.get().create_resource_object('window', xid).get_image(*rect, X.ZPixmap, 0xFFFFFFFF)
+    except error.XError:
+        return None
+    return np.frombuffer(img.data, np.uint8).reshape(rect[3], rect[2], 4)[..., 1].astype(np.float32)
+
+
+def scenario_vscode_scroll(h: Harness) -> None:
+    """VS Code reports positions over AT-SPI only every ~500 ms: the highlight must follow the pixels while
+    scrolling. Truth = where the quote's own pixels are (template match), compared with the painted highlight."""
+    import numpy as np
+    print('[vscode_scroll] highlight follows wheel scrolling in a VS Code webview')
+    doc = h.run_dir / 'scroll.md'
+    rng = random.Random(7)                              # like an agent's reply: varied prose, plus a list whose
+    words = ['梯度', '学习率', '批大小', '权重衰减', '动量', '验证集', '过拟合', '正则化', '损失曲线', '检查点',
+             '数据增强', '早停', '温度', '采样', '注意力', '残差']     # lines all start alike (hard for motion)
+    paras = []
+    for i in range(70):
+        if 20 <= i < 30:
+            paras.append(f'- 步骤：检查 {rng.choice(words)} 的设置')
+            continue
+        n = rng.randint(1, 3)
+        paras.append('，'.join(f'{rng.choice(words)}{rng.choice(["会影响", "取决于", "通常配合", "可以替代"])}'
+                              f'{rng.choice(words)}' for _ in range(n)) + f'（{rng.randint(10, 999)}）。')
+    paras[9] = f'{SCROLL_QUOTE}，高亮应当紧贴着它移动。'
+    doc.write_text('# 滚动测试\n\n' + '\n\n'.join(paras) + '\n', encoding='utf-8')
+    xid, pids = _open_vscode(h, doc)
+    if not h.check('vscode window appears', xid):
+        return
+    h.pump(4)
+    _vscode_dismiss_dialogs(pids)
+    h.activate(xid)
+    h.pump(0.5)
+    if not h.check('select the quote in the preview', h.wait(lambda: h.select_text(pids, SCROLL_QUOTE), 10)):
+        return
+    h.key('shift+alt+y', xid)                              # YES: saved at once
+    h.wait(lambda: h.db(), 4)
+    h.select_text(pids, '\u200b')
+    where = h.wait(lambda: quote_rect(pids, SCROLL_QUOTE), 5)
+    painted = h.wait(lambda: covers(overlay_rects(h), where), 6)
+    if not h.check('highlight drawn in the VS Code preview', painted, f'quote {where}, overlay {overlay_rects(h)}'):
+        return
+    h.pump(1.0)                                          # quiet: AT-SPI and the pixels agree
+    where = quote_rect(pids, SCROLL_QUOTE)
+    win = windows.client_rect(xid)
+    qx, qy, qw, qh = where
+    band = (qx - win[0], 0, min(qw, 300), win[3])           # window-relative column of the quote, full height
+    tmpl = _gray(xid, (band[0], qy - win[1], band[2], qh))
+    ov0 = min(r[1] for r in overlay_rects(h) if r[0] <= qx + 10 <= r[0] + r[2])
+
+    def truth(last: int) -> int | None:
+        img = _gray(xid, band)
+        if img is None or tmpl is None:
+            return None
+        lo, hi = max(0, last - win[1] - 500), min(len(img) - qh, last - win[1] + 500)
+        costs = [np.abs(img[y:y + qh] - tmpl).mean() for y in range(lo, hi)]
+        return lo + int(np.argmin(costs)) + win[1] if costs else None
+
+    def overlay_y() -> int | None:
+        ys = [r[1] for r in overlay_rects(h) if r[0] <= qx + 10 <= r[0] + r[2]]
+        return min(ys) if ys else None
+
+    if not h.check("test setup: the quote's pixels are found where AT-SPI says", truth(qy) == qy, str(truth(qy))):
+        return
+    d = xd.get()
+    ptr = xd.root().query_pointer()
+    xtest.fake_input(d, X.MotionNotify, x=qx + qw // 2, y=qy); d.sync()
+    h.pump(0.3)
+    errs, last, presses, trace = [], qy, [], []
+    for btn in (5, 5, 5, 4, 4, 4):
+        presses.append((time.monotonic() + 0.25 * len(presses), btn))
+    t0 = time.monotonic()
+    t_end = presses[-1][0] + 1.0 + 1.5
+    while time.monotonic() < t_end:
+        now = time.monotonic()
+        while presses and presses[0][0] <= now:
+            xtest.fake_input(d, X.ButtonPress, presses[0][1]); xtest.fake_input(d, X.ButtonRelease, presses[0][1]); d.sync()
+            presses.pop(0)
+            if len(presses) == 3:                          # pause between the downs and the ups
+                presses = [(t + 1.0, b) for t, b in presses]
+        h.pump(0.008)
+        ty, oy = truth(last), overlay_y()
+        trace.append((round(now - t0, 3), ty, oy))
+        if ty is None:
+            continue
+        last = ty
+        if oy is not None:
+            errs.append((round(now - t0, 3), (oy - ov0) - (ty - qy)))
+    xtest.fake_input(d, X.MotionNotify, x=ptr.root_x, y=ptr.root_y); d.sync()
+    ys = [t[1] for t in trace if t[1] is not None]
+    h.check('the text really scrolled (test setup)', ys and max(ys) - min(ys) >= 200, f'text y {min(ys)}..{max(ys)}')
+    a = np.abs([e for _, e in errs]) if errs else np.array([9999])
+    worst = sorted(errs, key=lambda e: -abs(e[1]))[:5]
+    print(f'    highlight vs text: {len(errs)} samples, median {np.median(a):.0f} px, p90 {np.percentile(a, 90):.0f} px,'
+          f' max {a.max():.0f} px; worst {worst}')
+    # (text and highlight are sampled ~10 ms apart: at full scroll speed that alone is ~30 px)
+    h.check('highlight keeps up while scrolling (p90 lag ≤ 80 px)', np.percentile(a, 90) <= 80, f'p90 {np.percentile(a, 90):.0f}')
+    h.check('…and ends exactly on the text', errs and abs(errs[-1][1]) <= 4, str(errs[-3:]))
+    if os.environ.get('E2E_TRACE'):
+        print('    trace (s, text y, highlight y):', trace)
 
 
 def _vscode_buttons(pids: set[int], inside_dialog: bool):
@@ -605,7 +717,7 @@ def scenario_highlight(h: Harness) -> None:
     # another window on top of half of the quote (shown without taking focus: the user keeps working in Firefox)
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QWidget
-    cover = QWidget(None, Qt.Window)
+    cover = QWidget(None, Qt.Window | Qt.WindowStaysOnTopHint)   # (GNOME puts unfocused new windows below)
     cover.setAttribute(Qt.WA_ShowWithoutActivating)
     cover.setStyleSheet('background: #333;')
     dpr = QGuiApplication.primaryScreen().devicePixelRatio()
@@ -616,7 +728,10 @@ def scenario_highlight(h: Harness) -> None:
     left_half = (cx, cy, cw // 2, ch)
     right_half = (cx + cw // 2 + 4, cy, cw // 2 - 4, ch)
     clipped = h.wait(lambda: not covers(overlay_rects(h), left_half) and covers(overlay_rects(h), right_half), 4)
-    h.check('window on top → highlight clipped to the visible part', clipped, f'overlay {overlay_rects(h)}')
+    cg = cover.frameGeometry()
+    h.check('window on top → highlight clipped to the visible part', clipped,
+            f'overlay {overlay_rects(h)}; cover at {(cg.x(), cg.y(), cg.width(), cg.height())} (logical), '
+            f'occluders seen {windows.occluders(xid)}')
     h.shot('highlight_occluded', xid)
     cover.close()
     h.pump(0.3)
@@ -744,7 +859,7 @@ def scenario_bubble(h: Harness) -> None:
             str(rows[-1] if rows else None))
 
 SCENARIOS = {'firefox': scenario_firefox, 'terminal': scenario_terminal, 'vscode': scenario_vscode,
-             'highlight': scenario_highlight, 'bubble': scenario_bubble}
+             'highlight': scenario_highlight, 'bubble': scenario_bubble, 'vscode_scroll': scenario_vscode_scroll}
 
 
 def main() -> int:

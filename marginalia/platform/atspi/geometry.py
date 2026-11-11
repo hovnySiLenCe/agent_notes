@@ -109,3 +109,53 @@ def visible_area(node) -> Rect | None:
             break
         n = n.get_parent()
     return clip if doc_clip is None else doc_clip
+
+
+def scroll_pane(node) -> Rect | None:
+    """Visible area of the scroll pane `node` moves in: the first container up the tree that its content
+    overflows (the child on the way extends past its top or bottom), clipped by the containers around it.
+    Unlike visible_area(), this box stays put while the content scrolls. None if no such container."""
+    child = node_rect(node)
+    n = node.get_parent()
+    while n is not None and child is not None:
+        try:
+            role = n.get_role_name()
+        except Exception:
+            return None
+        if role in ('application', 'frame'):
+            return None
+        r = node_rect(n)
+        if r is not None:
+            if child[1] < r[1] - 2 or child[1] + child[3] > r[1] + r[3] + 2:
+                outer = visible_area(n)
+                return r if outer is None else (intersect(r, outer) or EMPTY)
+            child = r
+        n = n.get_parent()
+    return None
+
+
+SCALES = (1.0, 2.0, 1.5, 1.25, 1.75, 3.0)
+
+
+def box_scale(node, offset: int) -> float:
+    """Factor from the node's box coordinates to its character coordinates. Firefox at 2x desktop scaling
+    reports characters in physical pixels but boxes (its own and its containers') in logical ones; Chromium
+    reports both in physical pixels. Found by which scaling of the node's own box contains the character."""
+    r = node_rect(node)
+    try:
+        c = T.get_character_extents(node, offset, Atspi.CoordType.SCREEN)
+    except Exception:
+        return 1.0
+    if r is None or c.width <= 0:
+        return 1.0
+    cx, cy = c.x + c.width / 2, c.y + c.height / 2
+    for k in SCALES:
+        if r[0] * k - 2 <= cx <= (r[0] + r[2]) * k + 2 and r[1] * k - 2 <= cy <= (r[1] + r[3]) * k + 2:
+            return k
+    return 1.0
+
+
+def scaled(r: Rect | None, k: float) -> Rect | None:
+    if r is None or r == EMPTY or k == 1.0:
+        return r
+    return (round(r[0] * k), round(r[1] * k), round(r[2] * k), round(r[3] * k))

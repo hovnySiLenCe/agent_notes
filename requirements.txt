@@ -1,2 +1,3 @@
 PySide6-Essentials>=6.5,!=6.12.0   # 6.12.0: Signal.emit() drops a reference to True -> crash (see marginalia/qtfix.py)
 python-xlib>=0.33
+numpy>=1.21                        # pixel-motion tracking while scrolling (Ubuntu: python3-numpy)

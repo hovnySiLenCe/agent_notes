@@ -84,6 +84,12 @@ YES、NO、已解决、忽略、保留是简单标签（`input: none`）：点�
 - 在某个窗口里工作时，该窗口里**待发送**批注对应的原文会被标上类型颜色的半透明高亮（`highlight.show` 可改为 `all` 包括已发送的，或 `hover` 只在悬停时显示）。
 - 高亮跟随滚动；滚出视野、被浏览器工具栏或其它窗口挡住的部分不画；高亮层不接收鼠标，不影响点击和选字。
   滚动时约 60 帧/秒，每帧只需约 1 ms（只查询原文首尾两个字符的位置，平移时直接平移已有矩形）；静止时每 0.1 秒检查一次。
+  VS Code、Chrome 等 Chromium 系应用通过无障碍接口报告的位置大约每 0.5 秒才更新一次，只靠它高亮会一跳一跳。
+  所以滚动时还会直接看窗口像素：从目标窗口截取滚动区域里几条 32 像素宽的竖条（有窗口合成器时截到的是该窗口自己的画面，
+  不含高亮层），逐帧比对算出内容移动了多少（每帧约 2 ms），高亮按这个距离平移；无障碍位置随后追上时自动对齐，
+  不会重复计算。内容重复（每行开头都一样的列表）时宁可不动也不乱跳。实测 VS Code 滚动时高亮与文字的偏差中位数约 2 px
+  （之前约 250 px）。Firefox 的无障碍位置本身就是实时的，程序会自动识别，直接使用。
+  Firefox 在 2 倍缩放桌面上用逻辑像素报告元素框、用物理像素报告文字，程序按每段文字自动换算。
   原文暂时不在无障碍树里时（VS Code 聊天会移除滚得较远的消息），查找要遍历整个窗口的树（约 0.3 秒）：
   这一步被切成每帧 15 ms 的小片、滚动时暂停、同一窗口的多条批注共用一次遍历；一直找不到的批注重试间隔从 3 秒
   逐次翻倍到 60 秒，每次停止滚动后再立即找一次。所以高亮跟随不会因为查找而卡顿。
@@ -141,7 +147,7 @@ YES、NO、已解决、忽略、保留是简单标签（`input: none`）：点�
 ./scripts/setup.sh --test                                                 # 一次性：本地解压 Xvfb（无需 sudo）
 .venv/bin/python -m tests.e2e.sandbox -- .venv/bin/python -m tests.e2e.run_e2e firefox highlight bubble
                                                                           # 端到端测试，在不可见的虚拟桌面里跑
-.venv/bin/python -m tests.e2e.run_e2e [firefox] [terminal] [vscode] [highlight] [bubble]   # 在真实桌面上跑
+.venv/bin/python -m tests.e2e.run_e2e [firefox] [terminal] [vscode] [highlight] [bubble] [vscode_scroll]   # 在真实桌面上跑
 ```
 
 端到端测试会自行启动临时的 Firefox / gnome-terminal / VS Code（禁用 GPU、nice 19），用模拟输入走完
@@ -158,7 +164,8 @@ YES、NO、已解决、忽略、保留是简单标签（`input: none`）：点�
 ```
 marginalia/
   core/        数据模型、SQLite 存储、模板、prompt 拼装、原文重定位（anchor.py）（无 Qt / 平台依赖）
-  platform/    平台抽象 base.py；x11/（窗口、层叠与遮挡、XTest、全局快捷键、鼠标划词监听 selwatch.py）；
+  platform/    平台抽象 base.py；x11/（窗口、层叠与遮挡、XTest、全局快捷键、鼠标划词监听 selwatch.py、
+               滚动像素跟踪 motion.py）；
                atspi/（选区采集、输入框定位、坐标、原文定位 locate.py、滚动跟踪 tracker.py）
   ui/          悬浮面板、批注弹窗、高亮层 overlay.py、划词按钮 bubble.py、提示、托盘、主题
   highlight.py 高亮控制：选哪些批注、轮询位置、遮挡裁剪、跳回原文

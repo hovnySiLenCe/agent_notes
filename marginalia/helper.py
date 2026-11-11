@@ -88,7 +88,7 @@ def _serve(fd: int, own_pid: int) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)          # Ctrl+C in a foreground run is the parent's business
     faulthandler.enable()
     from . import config as cfgmod
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s [helper]: %(message)s',
+    logging.basicConfig(level=logging.DEBUG if os.environ.get('MARGINALIA_DEBUG') else logging.INFO, format='%(asctime)s %(levelname)s %(name)s [helper]: %(message)s',
                         handlers=[logging.FileHandler(cfgmod.data_dir() / 'marginalia.log', encoding='utf-8')])
     from .platform.base import get_platform
     platform = get_platform(own_pid)

@@ -32,10 +32,11 @@ class TrackerSearchTest(unittest.TestCase):
             hit = next((n for n, _, t in nodes if t == quote), None)
             return [Segment(hit, 0, len(quote), quote)] if hit else None
 
-        def refresh(s, xid):
+        def refresh(s, xid, *_):
             s.raw = [(10, 10, 50, 10)]
         win = SimpleNamespace(active_window=lambda: SimpleNamespace(pid=2, xid=WIN), is_shown=lambda x: True,
-                              client_rect=lambda x: (0, 0, 800, 600), occluders=lambda x: [])
+                              client_rect=lambda x: (0, 0, 800, 600), occluders=lambda x: [],
+                              compositing=lambda: False)
         for name, value in (('windows', win), ('collect', collect), ('resolve', resolve), ('_refresh', refresh),
                             ('frames_for', lambda pid, xid: [FRAME]), ('fast_locate', lambda *a: None),
                             ('SEARCH_SLICE', 0.025)):
