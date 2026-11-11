@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent_notes.__main__ import _preload_xcb_cursor
+from marginalia.__main__ import _preload_xcb_cursor
 
 _preload_xcb_cursor()
 
@@ -28,12 +28,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from Xlib import X, Xatom, error  # noqa: E402
 from Xlib.ext import xtest  # noqa: E402
 
-from agent_notes import config as cfgmod  # noqa: E402
-from agent_notes.core.composer import compose  # noqa: E402
-from agent_notes.core.models import Annotation  # noqa: E402
-from agent_notes.platform.atspi.geometry import vte_rects  # noqa: E402
-from agent_notes.platform.atspi.tree import Atspi, S, T, walk  # noqa: E402
-from agent_notes.platform.x11 import display as xd, keys, windows  # noqa: E402
+from marginalia import config as cfgmod  # noqa: E402
+from marginalia.core.composer import compose  # noqa: E402
+from marginalia.core.models import Annotation  # noqa: E402
+from marginalia.platform.atspi.geometry import vte_rects  # noqa: E402
+from marginalia.platform.atspi.tree import Atspi, S, T, walk  # noqa: E402
+from marginalia.platform.x11 import display as xd, keys, windows  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / 'tests/e2e/fixtures'
@@ -51,10 +51,10 @@ def spawn(cmd: list[str], **kw) -> subprocess.Popen:
     exe = cmd[3] if cmd[:2] == ['nice', '-n'] else cmd[0]
     name = os.path.basename(exe)
     # /usr/bin/firefox on Ubuntu is a wrapper script around the snap: look at /snap/bin
-    if os.environ.get('AGENT_NOTES_SANDBOX') and os.path.realpath(f'/snap/bin/{name}') == '/usr/bin/snap':
+    if os.environ.get('MARGINALIA_SANDBOX') and os.path.realpath(f'/snap/bin/{name}') == '/usr/bin/snap':
         real_bus = f"unix:path={os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')}/bus"
         cmd = ['env', f'DBUS_SESSION_BUS_ADDRESS={real_bus}', 'systemd-run', '--user', '--scope', '--quiet',
-               '--unit', f'snap.{name}.{name}-agent-notes-e2e-{os.getpid()}-{random.randint(0, 99999)}',
+               '--unit', f'snap.{name}.{name}-marginalia-e2e-{os.getpid()}-{random.randint(0, 99999)}',
                'env', f"DBUS_SESSION_BUS_ADDRESS={os.environ['DBUS_SESSION_BUS_ADDRESS']}", *cmd]
     log = open(WORK / f'{os.path.basename(exe)}.log', 'ab')
     return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, **kw)
@@ -140,11 +140,11 @@ class Harness:
     def start_app(self, name: str) -> None:
         """A fresh app instance with its own config/data per scenario, so scenarios don't see each other's notes."""
         self.app_dir = self.run_dir / name
-        env = dict(os.environ, AGENT_NOTES_CONFIG_DIR=str(self.app_dir / 'config'),
-                   AGENT_NOTES_DATA_DIR=str(self.app_dir / 'data'))
+        env = dict(os.environ, MARGINALIA_CONFIG_DIR=str(self.app_dir / 'config'),
+                   MARGINALIA_DATA_DIR=str(self.app_dir / 'data'))
         self.app_dir.mkdir(parents=True, exist_ok=True)
         log = open(self.app_dir / 'app.log', 'w')
-        self.app_proc = subprocess.Popen(['nice', '-n', '19', sys.executable, '-m', 'agent_notes', '--foreground'],
+        self.app_proc = subprocess.Popen(['nice', '-n', '19', sys.executable, '-m', 'marginalia', '--foreground'],
                                          cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         ok = self.wait(lambda: self.panel_xid(), 15)
         if not self.check('app starts and shows the floating panel', ok):
@@ -162,7 +162,7 @@ class Harness:
     def panel_xid(self) -> int | None:
         for w in windows.client_list():
             i = windows.info(w)
-            if i and self.app_proc and i.pid == self.app_proc.pid and i.title == 'Agent Notes':
+            if i and self.app_proc and i.pid == self.app_proc.pid and i.title == 'Marginalia':
                 return w
         return None
 
@@ -485,7 +485,7 @@ def overlay_rects(h: Harness) -> list[tuple[int, int, int, int]]:
             if not pid or not h.app_proc or pid.value[0] != h.app_proc.pid:
                 continue
             name = w.get_full_property(xd.atom('_NET_WM_NAME'), xd.atom('UTF8_STRING'))
-            if not name or name.value != b'Agent Notes highlights' or w.get_attributes().map_state != X.IsViewable:
+            if not name or name.value != b'Marginalia highlights' or w.get_attributes().map_state != X.IsViewable:
                 continue
             g, o = w.get_geometry(), w.translate_coords(xd.root(), 0, 0)
             for r in w.shape_get_rectangles(0).rectangles:         # 0 = ShapeBounding
@@ -558,8 +558,8 @@ def scenario_highlight(h: Harness) -> None:
     h.shot('highlight_initial', xid)
 
     # plain-text captures (apps that don't report selection offsets) get an anchor by searching the tree
-    from agent_notes.platform.atspi.locate import anchor_from_text
-    from agent_notes.platform.atspi.tracker import Tracker
+    from marginalia.platform.atspi.locate import anchor_from_text
+    from marginalia.platform.atspi.tracker import Tracker
     pid = next(iter(p for p in pids if any(windows.info(w) and windows.info(w).pid == p for w in [xid])), None)
     plain = '把梯度的范数限制在\n某个阈值以内'              # as copied from the page: line break where it wrapped
     anchor = anchor_from_text(pid, xid, plain)
@@ -659,7 +659,7 @@ def bubble_rect(h: Harness) -> tuple[int, int, int, int] | None:
             if not pid or not h.app_proc or pid.value[0] != h.app_proc.pid:
                 continue
             name = w.get_full_property(xd.atom('_NET_WM_NAME'), xd.atom('UTF8_STRING'))
-            if not name or name.value != b'Agent Notes bubble' or w.get_attributes().map_state != X.IsViewable:
+            if not name or name.value != b'Marginalia bubble' or w.get_attributes().map_state != X.IsViewable:
                 continue
             g, o = w.get_geometry(), w.translate_coords(xd.root(), 0, 0)
             return (-o.x, -o.y, g.width, g.height)

@@ -8,23 +8,40 @@ from pathlib import Path
 
 from .core.models import AnnoType
 
-APP = 'agent-notes'
+APP = 'marginalia'
+OLD_APP = 'agent-notes'      # the name before Marginalia: its config and data are moved over once
+
+
+def _config_home() -> Path:
+    return Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+
+
+def _data_home() -> Path:
+    return Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share')
 
 
 def config_dir() -> Path:
-    base = os.environ.get('AGENT_NOTES_CONFIG_DIR') or \
-        Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / APP
-    p = Path(base)
+    p = Path(os.environ.get('MARGINALIA_CONFIG_DIR') or _config_home() / APP)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def data_dir() -> Path:
-    base = os.environ.get('AGENT_NOTES_DATA_DIR') or \
-        Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share') / APP
-    p = Path(base)
+    p = Path(os.environ.get('MARGINALIA_DATA_DIR') or _data_home() / APP)
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def migrate_old_dirs() -> list[str]:
+    """Move ~/.config/agent-notes and ~/.local/share/agent-notes to the new names (unless overridden by the
+    environment or already there). Returns what was moved."""
+    moved = []
+    for env, home in (('MARGINALIA_CONFIG_DIR', _config_home()), ('MARGINALIA_DATA_DIR', _data_home())):
+        old, new = home / OLD_APP, home / APP
+        if not os.environ.get(env) and old.is_dir() and not new.exists():
+            old.rename(new)
+            moved.append(f'{old} → {new}')
+    return moved
 
 
 def config_path() -> Path:

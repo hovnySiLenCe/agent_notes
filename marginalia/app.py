@@ -28,7 +28,7 @@ from .ui.tray import app_icon, make_tray
 from .helper import Helper
 from .worker import Worker
 
-log = logging.getLogger('agent_notes')
+log = logging.getLogger('marginalia')
 RESTORE_CLIPBOARD_MS = 900
 
 
@@ -357,7 +357,7 @@ class Controller(QObject):
 
 def _setup_logging(to_stderr: bool) -> None:
     fmt = '%(asctime)s %(levelname)s %(name)s: %(message)s'
-    handlers: list[logging.Handler] = [logging.FileHandler(cfgmod.data_dir() / 'agent-notes.log', encoding='utf-8')]
+    handlers: list[logging.Handler] = [logging.FileHandler(cfgmod.data_dir() / 'marginalia.log', encoding='utf-8')]
     if to_stderr:
         handlers.append(logging.StreamHandler(sys.stderr))
     logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
@@ -408,10 +408,10 @@ class CommandServer(QObject):
 def run(argv: list[str], log_to_stderr: bool = True) -> int:
     """Start the GUI. The caller (__main__) has already made sure no other instance is running."""
     _setup_logging(log_to_stderr)
-    faulthandler.enable()          # a native crash leaves a Python stack in agent-notes.out
+    faulthandler.enable()          # a native crash leaves a Python stack in marginalia.out
     qtfix.apply()
     app = QApplication(argv)
-    app.setApplicationName('agent-notes')
+    app.setApplicationName('marginalia')
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
     theme.apply(app)
@@ -425,5 +425,5 @@ def run(argv: list[str], log_to_stderr: bool = True) -> int:
         signal.signal(sig, lambda *_: ctl.quit())
     wake = QTimer(interval=500, timeout=lambda: None)
     wake.start()
-    log.info('agent-notes started (pid %d)', os.getpid())
+    log.info('marginalia started (pid %d)', os.getpid())
     return app.exec()

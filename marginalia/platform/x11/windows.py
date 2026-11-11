@@ -90,7 +90,7 @@ def server_time() -> int:
     if w is None:
         w = _local.ts_window = xd.root().create_window(-10, -10, 1, 1, 0, X.CopyFromParent,
                                                        event_mask=X.PropertyChangeMask)
-    w.change_property(xd.atom('_AGENT_NOTES_TS'), Xatom.STRING, 8, b'x')
+    w.change_property(xd.atom('_MARGINALIA_TS'), Xatom.STRING, 8, b'x')
     d.flush()
     while True:
         e = d.next_event()

@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 
-from agent_notes.platform.atspi import geometry as G
+from marginalia.platform.atspi import geometry as G
 
 
 class Node:

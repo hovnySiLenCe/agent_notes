@@ -19,19 +19,19 @@ def _display_tag() -> str:
 
 def runtime_dir() -> Path:
     base = os.environ.get('XDG_RUNTIME_DIR')
-    p = Path(base) if base and os.path.isdir(base) else Path('/tmp') / f'agent-notes-{os.getuid()}'
+    p = Path(base) if base and os.path.isdir(base) else Path('/tmp') / f'marginalia-{os.getuid()}'
     if len(str(p)) > 80:              # Unix socket paths are limited to 108 bytes
-        p = Path('/tmp') / f'agent-notes-{os.getuid()}'
+        p = Path('/tmp') / f'marginalia-{os.getuid()}'
     p.mkdir(mode=0o700, parents=True, exist_ok=True)
     return p
 
 
 def socket_path() -> Path:
-    return runtime_dir() / f'agent-notes-{_display_tag()}.sock'
+    return runtime_dir() / f'marginalia-{_display_tag()}.sock'
 
 
 def pid_path() -> Path:
-    return runtime_dir() / f'agent-notes-{_display_tag()}.pid'
+    return runtime_dir() / f'marginalia-{_display_tag()}.pid'
 
 
 def request(cmd: str, timeout: float = 2.0) -> int | None:
@@ -56,13 +56,13 @@ def request(cmd: str, timeout: float = 2.0) -> int | None:
 
 
 def recorded_pid() -> int | None:
-    """PID written by the instance that owns the socket, if that process still is Agent Notes."""
+    """PID written by the instance that owns the socket, if that process still is Marginalia."""
     try:
         pid = int(pid_path().read_text().strip())
         cmd = Path(f'/proc/{pid}/cmdline').read_bytes()
     except (OSError, ValueError):
         return None
-    return pid if b'agent_notes' in cmd else None
+    return pid if b'marginalia' in cmd else None
 
 
 def wait_gone(pid: int, timeout: float) -> bool:

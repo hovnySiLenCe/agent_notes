@@ -3,15 +3,15 @@ import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')   # no window ever appears on the desktop
 
-from agent_notes.__main__ import _preload_xcb_cursor  # noqa: E402
+from marginalia.__main__ import _preload_xcb_cursor  # noqa: E402
 
 _preload_xcb_cursor()
 
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QApplication, QToolButton  # noqa: E402
 
-from agent_notes.core.models import AnnoType  # noqa: E402
-from agent_notes.ui.bubble import SelectionBubble  # noqa: E402
+from marginalia.core.models import AnnoType  # noqa: E402
+from marginalia.ui.bubble import SelectionBubble  # noqa: E402
 
 
 class BubbleTest(unittest.TestCase):

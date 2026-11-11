@@ -1,6 +1,6 @@
 """A tiny EWMH window manager for the headless test sandbox (Xvfb has none, and none is installed).
 
-Implements just what Agent Notes relies on: _NET_ACTIVE_WINDOW (read + activation requests), _NET_CLIENT_LIST,
+Implements just what Marginalia relies on: _NET_ACTIVE_WINDOW (read + activation requests), _NET_CLIENT_LIST,
 _NET_CLIENT_LIST_STACKING, _NET_CURRENT_DESKTOP. No decorations, no reparenting.
 
 Usage:  python -m tests.e2e.miniwm        (DISPLAY must point at the sandbox server)
@@ -117,7 +117,7 @@ class WM:
                     self.forget(e.window.id)
                 elif e.type == X.ClientMessage and e.client_type == A('_NET_ACTIVE_WINDOW'):
                     # Like mutter's focus-stealing prevention: apps raising themselves (source 1, e.g. Firefox
-                    # once its page loads) don't get focus; pagers/tools (source 2, Agent Notes) do.
+                    # once its page loads) don't get focus; pagers/tools (source 2, Marginalia) do.
                     if e.data[1][0] != 1 or not self.active:
                         self.activate(e.window.id, f'request source={e.data[1][0]}')
             except error.XError:

@@ -39,7 +39,7 @@ class SelectionWatcher(QObject):
         if self._thread:
             return
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, args=(self._stop,), name='agent-notes-selection',
+        self._thread = threading.Thread(target=self._run, args=(self._stop,), name='marginalia-selection',
                                         daemon=True)
         self._thread.start()
 

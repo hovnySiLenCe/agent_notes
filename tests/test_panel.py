@@ -7,15 +7,15 @@ from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')   # no window ever appears on the desktop
 
-from agent_notes.__main__ import _preload_xcb_cursor  # noqa: E402
+from marginalia.__main__ import _preload_xcb_cursor  # noqa: E402
 
 _preload_xcb_cursor()
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from agent_notes import config as cfgmod  # noqa: E402
-from agent_notes.core.store import Store  # noqa: E402
-from agent_notes.ui.panel import FloatingPanel  # noqa: E402
+from marginalia import config as cfgmod  # noqa: E402
+from marginalia.core.store import Store  # noqa: E402
+from marginalia.ui.panel import FloatingPanel  # noqa: E402
 
 
 class PanelOpacityTest(unittest.TestCase):
@@ -103,7 +103,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertFalse(self.panel._collapsed)                  # visible for a moment before tucking away
 
     def test_delete_card_and_clear_menu(self):
-        from agent_notes.core.models import SENT, Annotation
+        from marginalia.core.models import SENT, Annotation
         st = self.ctl.store
         a = st.add(Annotation('expand', 'A', created_at=1.0))
         b = st.add(Annotation('ask', 'B', comment='q', created_at=2.0))
@@ -121,7 +121,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertEqual([x.id for x in st.all()], [b.id])
 
     def test_resolve_and_reopen(self):
-        from agent_notes.core.models import PENDING, RESOLVED, Annotation
+        from marginalia.core.models import PENDING, RESOLVED, Annotation
         st = self.ctl.store
         a = st.add(Annotation('ask', 'A', created_at=1.0))
         self.panel.refresh()
@@ -141,7 +141,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertTrue(self.panel._collapsed)
 
     def test_newest_first_list_but_chronological_prompt(self):
-        from agent_notes.core.models import Annotation
+        from marginalia.core.models import Annotation
         st = self.ctl.store
         a = st.add(Annotation('expand', 'first', created_at=1.0))
         b = st.add(Annotation('expand', 'second', created_at=2.0))
@@ -150,7 +150,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertEqual([x.id for x in self.panel.prompt_items()], [a.id, b.id])
 
     def test_sent_annotations_can_be_rechecked_and_refilled(self):
-        from agent_notes.core.models import SENT, Annotation
+        from marginalia.core.models import SENT, Annotation
         st = self.ctl.store
         a = st.add(Annotation('expand', 'A'))
         b = st.add(Annotation('ask', 'B', comment='q'))
@@ -170,7 +170,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertAlmostEqual(self.panel.target_opacity(), 0.15)
 
     def test_button_labels_follow_hotkeys(self):
-        from agent_notes.ui.panel import short_hotkey
+        from marginalia.ui.panel import short_hotkey
         self.assertEqual(short_hotkey('Shift+Alt+Return'), '⇧⌥↵')
         self.assertEqual(short_hotkey('Alt+Return'), '⌥↵')
         self.panel.refresh()

@@ -16,7 +16,7 @@ from .theme import C
 if TYPE_CHECKING:
     from ..app import Controller
 
-MIME = 'application/x-agent-notes-id'
+MIME = 'application/x-marginalia-id'
 MIN_SIZE = (300, 160)          # expanded panel: room for the header and at least one card
 APP_NAMES = {'firefox': 'Firefox', 'firefox_firefox': 'Firefox', 'code': 'VS Code', 'google-chrome': 'Chrome', 'chromium': 'Chromium',
              'chromium-browser': 'Chromium', 'gnome-terminal-server': '终端', 'cursor': 'Cursor'}
@@ -279,7 +279,7 @@ class FloatingPanel(QWidget):
     def __init__(self, ctl: 'Controller'):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.ctl = ctl
-        self.setWindowTitle('Agent Notes')
+        self.setWindowTitle('Marginalia')
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setMinimumSize(*MIN_SIZE)

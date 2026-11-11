@@ -3,8 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from agent_notes.platform.atspi import tracker as tr
-from agent_notes.platform.atspi.locate import Segment
+from marginalia.platform.atspi import tracker as tr
+from marginalia.platform.atspi.locate import Segment
 
 WIN = 7
 FRAME = object()

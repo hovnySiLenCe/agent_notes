@@ -1,6 +1,6 @@
 import unittest
 
-from agent_notes.core.anchor import OBJ, find_all, find_quote, normalize, parts
+from marginalia.core.anchor import OBJ, find_all, find_quote, normalize, parts
 
 
 class AnchorTest(unittest.TestCase):
@@ -43,7 +43,7 @@ class AnchorTest(unittest.TestCase):
 
 class CapturePrimaryTest(unittest.TestCase):
     def test_primary_extends_the_reported_selection(self):
-        from agent_notes.platform.atspi.capture import _covers_more
+        from marginalia.platform.atspi.capture import _covers_more
         reported = '先说明进度：配置查看器已经跑起来了。'
         primary = '先说明进度：配置查看器已经跑起来了。\n\n- 接口检查正常\n- 对比功能可用'
         self.assertTrue(_covers_more(primary, reported))

@@ -21,7 +21,7 @@ class Worker(QObject):
     def __init__(self, remote: object | None = None, helper=None):
         """remote: the object whose bound methods run in `helper` (a helper.Helper) instead of this process."""
         super().__init__()
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='agent-notes-worker')
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='marginalia-worker')
         self._remote, self._helper = remote, helper
         self._done.connect(self._dispatch)
 

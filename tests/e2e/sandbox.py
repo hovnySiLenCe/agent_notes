@@ -23,7 +23,7 @@ DROP = ('DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'WAYLAND_DISPLAY', 'XA
         'GNOME_TERMINAL_SCREEN', 'GNOME_TERMINAL_SERVICE', 'GIO_LAUNCHED_DESKTOP_FILE', 'GIO_LAUNCHED_DESKTOP_FILE_PID')
 
 
-BUS_PREFIX = '/tmp/dbus-agent-notes-sandbox-'
+BUS_PREFIX = '/tmp/dbus-marginalia-sandbox-'
 
 
 def _kill_bus_children(n: int) -> None:
@@ -78,7 +78,7 @@ def main(argv: list[str]) -> int:
         env = {k: v for k, v in os.environ.items() if k not in DROP}
         env.update(DISPLAY=f':{n}', XDG_SESSION_TYPE='x11', GNOME_ACCESSIBILITY='1', QT_ACCESSIBILITY='1',
                    GTK_IM_MODULE='gtk-im-context-simple', QT_IM_MODULE='simple', NO_AT_BRIDGE='0',
-                   LIBGL_ALWAYS_SOFTWARE='1', AGENT_NOTES_SANDBOX='1')
+                   LIBGL_ALWAYS_SOFTWARE='1', MARGINALIA_SANDBOX='1')
         # One private session bus for the WM, the apps under test and the test driver (AT-SPI rides on it).
         # Abstract socket named @/tmp/dbus-*: snap apps (Firefox) have a private /tmp and their AppArmor profile
         # only allows abstract sockets with that prefix.

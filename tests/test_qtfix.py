@@ -1,7 +1,7 @@
 import sys
 import unittest
 
-from agent_notes import qtfix
+from marginalia import qtfix
 
 
 class EmitLeakTest(unittest.TestCase):

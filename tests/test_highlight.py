@@ -7,17 +7,17 @@ from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')   # no window ever appears on the desktop
 
-from agent_notes.__main__ import _preload_xcb_cursor  # noqa: E402
+from marginalia.__main__ import _preload_xcb_cursor  # noqa: E402
 
 _preload_xcb_cursor()
 
 from PySide6.QtCore import QRect  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from agent_notes import config as cfgmod  # noqa: E402
-from agent_notes.core.models import SENT, Annotation  # noqa: E402
-from agent_notes.core.store import Store  # noqa: E402
-from agent_notes.highlight import Highlighter  # noqa: E402
+from marginalia import config as cfgmod  # noqa: E402
+from marginalia.core.models import SENT, Annotation  # noqa: E402
+from marginalia.core.store import Store  # noqa: E402
+from marginalia.highlight import Highlighter  # noqa: E402
 
 XID, OTHER = 0x400001, 0x500001
 
@@ -118,7 +118,7 @@ class HighlighterTest(unittest.TestCase):
         self.assertEqual(self.hl.overlay.geometry().adjusted(3, 3, -3, -3), QRect(100, 100, 200, 20))
 
     def test_wheel_switches_to_fast_polling(self):
-        from agent_notes import highlight
+        from marginalia import highlight
         self.track_result = self.result({self.a.id: {'state': 'ok', 'rects': [(100, 100, 200, 20)]}})
         self.hl.tick()                                   # first paint counts as movement
         self.hl.tick()                                   # unchanged picture

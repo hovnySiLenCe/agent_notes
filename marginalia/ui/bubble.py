@@ -21,7 +21,7 @@ class SelectionBubble(QWidget):
                          | Qt.X11BypassWindowManagerHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setWindowTitle('Agent Notes bubble')
+        self.setWindowTitle('Marginalia bubble')
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self._frame = QFrame(objectName='bubble')

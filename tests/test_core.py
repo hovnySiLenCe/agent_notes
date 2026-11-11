@@ -3,11 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_notes import config as cfgmod
-from agent_notes.core.composer import clean_quote, compose
-from agent_notes.core.models import PENDING, SENT, AnnoType, Annotation
-from agent_notes.core.store import Store
-from agent_notes.core.template import render
+from marginalia import config as cfgmod
+from marginalia.core.composer import clean_quote, compose
+from marginalia.core.models import PENDING, SENT, AnnoType, Annotation
+from marginalia.core.store import Store
+from marginalia.core.template import render
 
 
 class TemplateTest(unittest.TestCase):
@@ -122,7 +122,7 @@ class StoreTest(unittest.TestCase):
 class HotkeyParseTest(unittest.TestCase):
     def test_parse(self):
         from Xlib import X, XK
-        from agent_notes.platform.x11.hotkeys import parse
+        from marginalia.platform.x11.hotkeys import parse
         self.assertEqual(parse('Shift+Alt+Space'), (X.ShiftMask | X.Mod1Mask, XK.XK_space))
         self.assertEqual(parse('shift+alt+enter'), (X.ShiftMask | X.Mod1Mask, XK.XK_Return))
         self.assertEqual(parse('Shift+Alt+E'), (X.ShiftMask | X.Mod1Mask, XK.XK_e))

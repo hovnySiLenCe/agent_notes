@@ -42,7 +42,7 @@ class Helper:
     def _start(self) -> None:
         parent, child = socket.socketpair()
         env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in (str(ROOT), os.environ.get('PYTHONPATH')) if p))
-        self._proc = subprocess.Popen([sys.executable, '-m', 'agent_notes.helper', str(child.fileno()),
+        self._proc = subprocess.Popen([sys.executable, '-m', 'marginalia.helper', str(child.fileno()),
                                        str(self.own_pid)], pass_fds=[child.fileno()], env=env,
                                       stdin=subprocess.DEVNULL)
         child.close()
@@ -89,7 +89,7 @@ def _serve(fd: int, own_pid: int) -> None:
     faulthandler.enable()
     from . import config as cfgmod
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s [helper]: %(message)s',
-                        handlers=[logging.FileHandler(cfgmod.data_dir() / 'agent-notes.log', encoding='utf-8')])
+                        handlers=[logging.FileHandler(cfgmod.data_dir() / 'marginalia.log', encoding='utf-8')])
     from .platform.base import get_platform
     platform = get_platform(own_pid)
     conn = Connection(fd)
@@ -102,10 +102,10 @@ def _serve(fd: int, own_pid: int) -> None:
         try:
             reply = ('ok', getattr(platform, name)(*args))
         except Exception as e:
-            logging.getLogger('agent_notes.helper').exception('%s failed', name)
+            logging.getLogger('marginalia.helper').exception('%s failed', name)
             reply = ('err', f'{type(e).__name__}: {e}')
         if time.monotonic() - t > 5:
-            logging.getLogger('agent_notes.helper').warning('%s took %.1f s', name, time.monotonic() - t)
+            logging.getLogger('marginalia.helper').warning('%s took %.1f s', name, time.monotonic() - t)
         try:
             conn.send(reply)
         except Exception:                                   # e.g. an unpicklable result

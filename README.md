@@ -1,6 +1,6 @@
-# Agent Notes
+# Marginalia · 眉批
 
-给任意 Agent 输出（网页、VS Code、桌面应用、终端 CLI）加批注的独立桌面程序（Linux X11）。
+像在书页边上写眉批一样，给任意 Agent 输出（网页、VS Code、桌面应用、终端 CLI）加批注的独立桌面程序（Linux X11）。
 选中文字 → 快捷键 → 选类型/写说明 → 批注进入桌面悬浮面板，原文上出现高亮 → 一键拼成 prompt 填回 Agent 输入框。
 
 ## 安装
@@ -10,21 +10,24 @@
 ./run.sh                # 在后台启动后立即返回；关掉终端也不影响。已在运行时只唤出面板
 ```
 
+（项目曾叫 Agent Notes：首次启动时会把 `~/.config/agent-notes`、`~/.local/share/agent-notes` 自动迁移到
+`~/.config/marginalia`、`~/.local/share/marginalia`，开机自启项也会更新。）
+
 | 命令 | 作用 |
 |---|---|
 | `./run.sh` | 后台启动（已在运行则显示面板；旧实例卡死/被挂起时自动结束它再启动） |
 | `./run.sh --status` | 是否在运行（PID） |
 | `./run.sh --stop` / `--restart` | 停止 / 重启（更新代码后用 `--restart`） |
 | `./run.sh -f` | 在当前终端前台运行，日志直接输出，`Ctrl+C` 退出 |
-| `./run.sh --autostart on\|off` | 登录桌面时自动启动（写入 `~/.config/autostart/agent-notes.desktop`） |
+| `./run.sh --autostart on\|off` | 登录桌面时自动启动（写入 `~/.config/autostart/marginalia.desktop`） |
 | `./run.sh --setup-firefox` | 为 Firefox 打开无障碍接口（重启 Firefox 后生效），用于精确定位与高亮 |
 
-后台运行的输出在 `~/.local/share/agent-notes/agent-notes.out`，日志在同目录 `agent-notes.log`。
+后台运行的输出在 `~/.local/share/marginalia/marginalia.out`，日志在同目录 `marginalia.log`。
 
-**崩溃隔离**：读取选区、定位原文、跟踪高亮、填入等无障碍 / X 查询都在一个辅助进程里运行（`agent_notes/helper.py`）。
+**崩溃隔离**：读取选区、定位原文、跟踪高亮、填入等无障碍 / X 查询都在一个辅助进程里运行（`marginalia/helper.py`）。
 VS Code 这类 Electron 应用在界面元素被销毁的瞬间被查询时，系统的 libatspi 可能直接段错误；现在只会让辅助进程退出，
 主程序（面板、快捷键、数据）不受影响，下一次查询自动换一个新的辅助进程。查询超过 15 秒没有返回也会被结束并重启。
-主程序崩溃时 Python 调用栈会写进 `agent-notes.out`。
+主程序崩溃时 Python 调用栈会写进 `marginalia.out`。
 
 **PySide6 6.12.0 有缺陷**：每次发出 Qt 信号都会少计一次 `True` 的引用，累计几千次后进程以 `free(): invalid pointer` 崩溃
 （划词按钮每次点鼠标都会发信号，几分钟就会闪退）。`requirements.txt` 已排除该版本，旧环境重新运行一次 `./scripts/setup.sh` 即可换成 6.11.x；
@@ -102,7 +105,7 @@ YES、NO、已解决、忽略、保留是简单标签（`input: none`）：点�
 
 ## 配置
 
-`~/.config/agent-notes/config.json`（首次启动生成，保存后自动重新加载；面板 ⋯ 菜单可直接打开）。
+`~/.config/marginalia/config.json`（首次启动生成，保存后自动重新加载；面板 ⋯ 菜单可直接打开）。
 
 自定义批注类型示例（`types` 列表整体替换默认值；菜单每行 4 个，1-9、0 选前 10 个，划词按钮显示前 4 个）：
 
@@ -129,7 +132,7 @@ YES、NO、已解决、忽略、保留是简单标签（`input: none`）：点�
 
 配置文件的修改会自动生效（系统 inotify 监视数用尽时改为每 2 秒检查一次修改时间）。
 
-数据：`~/.local/share/agent-notes/`（`notes.db` 批注、`state.json` 面板位置、`agent-notes.log` 日志）。
+数据：`~/.local/share/marginalia/`（`notes.db` 批注、`state.json` 面板位置、`marginalia.log` 日志）。
 
 ## 测试
 
@@ -153,7 +156,7 @@ YES、NO、已解决、忽略、保留是简单标签（`input: none`）：点�
 ## 结构
 
 ```
-agent_notes/
+marginalia/
   core/        数据模型、SQLite 存储、模板、prompt 拼装、原文重定位（anchor.py）（无 Qt / 平台依赖）
   platform/    平台抽象 base.py；x11/（窗口、层叠与遮挡、XTest、全局快捷键、鼠标划词监听 selwatch.py）；
                atspi/（选区采集、输入框定位、坐标、原文定位 locate.py、滚动跟踪 tracker.py）

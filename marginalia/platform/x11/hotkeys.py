@@ -52,7 +52,7 @@ class HotkeyListener(QObject):
         self.stop()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(dict(bindings), self._stop),
-                                        name='agent-notes-hotkeys', daemon=True)
+                                        name='marginalia-hotkeys', daemon=True)
         self._thread.start()
 
     def stop(self) -> None:

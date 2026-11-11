@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-AUTOSTART = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'autostart' / 'agent-notes.desktop'
+AUTOSTART = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'autostart' / 'marginalia.desktop'
 
 
 def _preload_xcb_cursor() -> None:
@@ -22,7 +22,7 @@ def _preload_xcb_cursor() -> None:
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog='run.sh', description='Agent Notes：给 Agent 输出加批注的桌面悬浮工具。'
+    p = argparse.ArgumentParser(prog='run.sh', description='Marginalia：给 Agent 输出加批注的桌面悬浮工具。'
                                 '不带参数时在后台启动（已在运行则显示面板）。')
     g = p.add_mutually_exclusive_group()
     g.add_argument('-f', '--foreground', action='store_true', help='在当前终端前台运行（日志输出到终端，Ctrl+C 退出）')
@@ -38,7 +38,7 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 def _log_file() -> Path:
     from .config import data_dir
-    return data_dir() / 'agent-notes.out'
+    return data_dir() / 'marginalia.out'
 
 
 def _stop() -> bool:
@@ -68,7 +68,7 @@ def _ensure_single() -> int | None:
 def _start_background() -> int:
     from . import ipc
     out = open(_log_file(), 'ab')
-    child = subprocess.Popen([sys.executable, '-m', 'agent_notes', '--detached'], cwd=ROOT,
+    child = subprocess.Popen([sys.executable, '-m', 'marginalia', '--detached'], cwd=ROOT,
                              stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                              start_new_session=True)          # own session: closing the terminal won't kill it
     end = time.monotonic() + 15
@@ -78,11 +78,25 @@ def _start_background() -> int:
             print('启动失败：\n' + '\n'.join(tail), file=sys.stderr)
             return 1
         if ipc.request('ping', timeout=0.5) == child.pid:
-            print(f'Agent Notes 已在后台运行（PID {child.pid}）。停止：./run.sh --stop　日志：{_log_file()}')
+            print(f'Marginalia 已在后台运行（PID {child.pid}）。停止：./run.sh --stop　日志：{_log_file()}')
             return 0
         time.sleep(0.2)
-    print(f'Agent Notes 已在后台启动（PID {child.pid}），但尚未响应；日志：{_log_file()}', file=sys.stderr)
+    print(f'Marginalia 已在后台启动（PID {child.pid}），但尚未响应；日志：{_log_file()}', file=sys.stderr)
     return 0
+
+
+def _migrate() -> None:
+    """From before the rename to Marginalia: move config/data over and update the autostart entry."""
+    from .config import migrate_old_dirs
+    try:
+        for what in migrate_old_dirs():
+            print(f'已迁移旧数据：{what}', file=sys.stderr)
+        old = AUTOSTART.with_name('agent-notes.desktop')
+        if old.exists():
+            old.unlink()
+            _autostart(True)
+    except OSError as e:
+        print(f'迁移旧数据失败：{e}', file=sys.stderr)
 
 
 def _autostart(on: bool) -> int:
@@ -92,7 +106,7 @@ def _autostart(on: bool) -> int:
         return 0
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
     AUTOSTART.write_text('\n'.join([
-        '[Desktop Entry]', 'Type=Application', 'Name=Agent Notes', 'Comment=给 Agent 输出加批注',
+        '[Desktop Entry]', 'Type=Application', 'Name=Marginalia', 'Comment=给 Agent 输出加批注',
         f'Exec={ROOT / "run.sh"}', 'Terminal=false', 'X-GNOME-Autostart-enabled=true',
         'X-GNOME-Autostart-Delay=5', '']), encoding='utf-8')
     print(f'已开启开机自启：{AUTOSTART}')
@@ -126,6 +140,7 @@ def setup_firefox(home: Path | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse(sys.argv[1:] if argv is None else argv)
+    _migrate()
     from . import ipc
     if args.status:
         pid = ipc.request('ping')
@@ -147,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     if pid is not None:
         ipc.request('show')
         if not args.detached:
-            print(f'Agent Notes 已在运行（PID {pid}），已显示面板。')
+            print(f'Marginalia 已在运行（PID {pid}），已显示面板。')
         return 0
     if not (args.foreground or args.detached):
         return _start_background()

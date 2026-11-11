@@ -4,9 +4,9 @@ import tempfile
 import time
 import unittest
 
-from agent_notes import helper as helpermod
-from agent_notes.helper import Helper, HelperError
-from agent_notes.platform.base import WindowInfo
+from marginalia import helper as helpermod
+from marginalia.helper import Helper, HelperError
+from marginalia.platform.base import WindowInfo
 
 TERM = WindowInfo(xid=1, pid=1, wm_class='gnome-terminal-server', wm_instance='', title='t')
 EDIT = WindowInfo(xid=2, pid=2, wm_class='Code', wm_instance='code', title='e')
@@ -17,16 +17,16 @@ class HelperTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.env = os.environ.get('AGENT_NOTES_DATA_DIR')
-        os.environ['AGENT_NOTES_DATA_DIR'] = self.tmp.name      # the helper logs there, not into the real log
+        self.env = os.environ.get('MARGINALIA_DATA_DIR')
+        os.environ['MARGINALIA_DATA_DIR'] = self.tmp.name      # the helper logs there, not into the real log
         self.h = Helper(os.getpid())
 
     def tearDown(self):
         self.h.close()
         if self.env is None:
-            os.environ.pop('AGENT_NOTES_DATA_DIR', None)
+            os.environ.pop('MARGINALIA_DATA_DIR', None)
         else:
-            os.environ['AGENT_NOTES_DATA_DIR'] = self.env
+            os.environ['MARGINALIA_DATA_DIR'] = self.env
         self.tmp.cleanup()
 
     def test_round_trip(self):

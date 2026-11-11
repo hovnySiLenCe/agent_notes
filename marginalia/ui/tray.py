@@ -35,7 +35,7 @@ def make_tray(ctl: 'Controller') -> QSystemTrayIcon | None:
     if not QSystemTrayIcon.isSystemTrayAvailable():
         return None
     tray = QSystemTrayIcon(app_icon())
-    tray.setToolTip('Agent Notes')
+    tray.setToolTip('Marginalia')
     menu = QMenu()
     menu.addAction('显示 / 隐藏面板', ctl.panel.toggle)
     menu.addAction('打开配置文件', ctl.open_config)

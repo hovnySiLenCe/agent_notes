@@ -30,7 +30,7 @@ class HighlightOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.setWindowTitle('Agent Notes highlights')
+        self.setWindowTitle('Marginalia highlights')
         self._marks: tuple[Mark, ...] = ()
         self.translucent = True            # False: no compositing manager, underline only
 

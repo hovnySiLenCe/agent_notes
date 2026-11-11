@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_notes.__main__ import FIREFOX_PREF, firefox_profiles, setup_firefox
+from marginalia.__main__ import FIREFOX_PREF, firefox_profiles, setup_firefox
 
 
 class SetupFirefoxTest(unittest.TestCase):
