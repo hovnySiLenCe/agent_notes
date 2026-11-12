@@ -173,8 +173,9 @@ class Controller(QObject):
             return
         self._last_external = win
         # PRIMARY keeps the last selection made anywhere; only trust it if this app made it.
-        primary = (QGuiApplication.clipboard().text(QClipboard.Selection)
-                   if self.platform.selection_belongs_to(win) else '')
+        primary = ''
+        if self.platform.selection_belongs_to(win):
+            primary = QGuiApplication.clipboard().text(QClipboard.Selection) or self.platform.read_selection()
         self._busy = True
         self.worker.submit(self.platform.capture_selection, win, primary,
                            cb=lambda res: self._on_captured(win, primary, type_id, res))

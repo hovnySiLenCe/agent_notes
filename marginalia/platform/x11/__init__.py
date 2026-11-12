@@ -52,8 +52,11 @@ class X11Platform(Platform):
         from .selwatch import SelectionWatcher
         return SelectionWatcher()
 
+    def read_selection(self) -> str:
+        return windows.read_primary()
+
     def selection_belongs_to(self, win: WindowInfo) -> bool:
-        return windows.primary_owned_by(win.xid)
+        return windows.primary_owned_by(win.xid, win.pid)
 
     def capture_selection(self, win: WindowInfo, primary: str = '') -> dict | None:
         from ..atspi.capture import capture_selection

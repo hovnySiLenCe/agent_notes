@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from Xlib import X, Xatom, error, protocol
+from Xlib import X, Xatom, display, error, protocol
 
 from ..base import WindowInfo
 from . import display as xd
@@ -58,9 +58,14 @@ def exists(xid: int) -> bool:
     return xid in client_list()
 
 
-def primary_owned_by(xid: int) -> bool:
-    """Is the PRIMARY selection owned by the same X client (application) as window `xid`?
-    Resource IDs carry the owning client in the bits above resource_id_mask."""
+def primary_owned_by(xid: int, pid: int | None = None) -> bool:
+    """Was the PRIMARY selection set by the application of window `xid` (process `pid`)?
+
+    Usually the window's own X client owns it (resource IDs carry the owning client in the bits above
+    resource_id_mask). Terminal programs that handle the mouse themselves (Claude Code's interface) set it
+    through a helper instead (xclip & co.): then the owner's process descends from the window's process
+    (terminal -> shell -> program -> xclip), possibly only through its process group or session once the
+    helper has gone to the background."""
     d = xd.get()
     try:
         owner = d.get_selection_owner(xd.atom('PRIMARY'))
@@ -70,7 +75,87 @@ def primary_owned_by(xid: int) -> bool:
     if not owner_id:
         return False
     mask = d.display.info.resource_id_mask
-    return (owner_id & ~mask) == (xid & ~mask)
+    if (owner_id & ~mask) == (xid & ~mask):
+        return True
+    if not pid:
+        return False
+    owner_pid = client_pid(owner_id)
+    return bool(owner_pid) and pid in _related_pids(owner_pid)
+
+
+def read_primary(timeout: float = 0.4) -> str:
+    """The PRIMARY selection's text, asked for as UTF8_STRING (then STRING). Some owners list more targets than
+    they serve (Claude Code advertises text/plain;charset=utf-8 but refuses it), which leaves Qt's reading empty.
+    Uses its own X connection: callable from any thread."""
+    try:
+        d = display.Display()
+    except Exception:
+        return ''
+    try:
+        win = d.screen().root.create_window(0, 0, 1, 1, 0, X.CopyFromParent)
+        prop = d.intern_atom('MARGINALIA_PRIMARY')
+        for target in ('UTF8_STRING', 'STRING'):
+            win.convert_selection(Xatom.PRIMARY, d.intern_atom(target), prop, X.CurrentTime)
+            d.flush()
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                if not d.pending_events():
+                    time.sleep(0.005)
+                    continue
+                ev = d.next_event()
+                if ev.type != X.SelectionNotify:
+                    continue
+                if ev.property != X.NONE:
+                    r = win.get_full_property(prop, X.AnyPropertyType)
+                    if r is not None and isinstance(r.value, bytes):
+                        return r.value.decode('utf-8' if target == 'UTF8_STRING' else 'latin-1', errors='replace')
+                break
+        return ''
+    except Exception:
+        return ''
+    finally:
+        d.close()
+
+
+def client_pid(resource: int) -> int | None:
+    """PID of the local X client owning `resource` (XRes extension), or None."""
+    d = xd.get()
+    try:
+        if not d.has_extension('X-Resource'):
+            return None
+        from Xlib.ext import res
+        reply = d.res_query_client_ids([{'client': resource, 'mask': res.LocalClientPIDMask}])
+        for item in reply.ids:
+            if item.value:
+                return int(item.value[0])
+    except Exception:
+        return None
+    return None
+
+
+def _stat(pid: int) -> tuple[int, int, int] | None:
+    """(parent, process group, session) from /proc."""
+    try:
+        with open(f'/proc/{pid}/stat') as f:
+            fields = f.read().rsplit(')', 1)[1].split()
+        return int(fields[1]), int(fields[2]), int(fields[3])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _related_pids(pid: int) -> set[int]:
+    """`pid`'s ancestors, and those of its process group leader and session leader."""
+    out: set[int] = set()
+    todo = [pid]
+    while todo and len(out) < 256:
+        p = todo.pop()
+        if p <= 1 or p in out:
+            continue
+        out.add(p)
+        st = _stat(p)
+        if st:
+            todo.extend(st)
+    return out
 
 
 def compositing() -> bool:

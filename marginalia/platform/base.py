@@ -48,6 +48,10 @@ class Platform(ABC):
         """worker: quote + anchor for the current text selection inside `win`, or None.
         `primary` is the X PRIMARY selection text, used to correct toolkits with unreliable offsets."""
 
+    def read_selection(self) -> str:
+        """The current text selection, read directly (when the toolkit's own reading came back empty)."""
+        return ''
+
     @abstractmethod
     def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool,
                at_cursor: bool = False) -> dict:
