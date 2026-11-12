@@ -8,6 +8,7 @@ import time
 
 from PySide6.QtCore import QObject, Signal
 from Xlib import X, XK, display, error
+from Xlib.ext import xtest
 
 log = logging.getLogger(__name__)
 
@@ -91,11 +92,22 @@ class HotkeyListener(QObject):
         log.info('hotkeys grabbed: %s', {v: k for k, v in grabbed.items()})
 
         last: dict[str, float] = {}
+        grabbed_codes = {kc for kc, _ in grabbed}
+        ctrl = d.keysym_to_keycode(XK.string_to_keysym('Control_L'))
         try:
             while not stop.is_set():
                 select.select([d], [], [], 0.2)
                 while d.pending_events():
                     ev = d.next_event()
+                    if ev.type == X.KeyRelease and ev.detail in grabbed_codes and ev.state & X.Mod1Mask and ctrl:
+                        # Our key is up, Alt still down: the app saw Alt go down but not our key, so releasing
+                        # Alt now would look like a lone Alt tap, which moves the focus to the menu bar (VS Code,
+                        # Firefox …) and the paste that follows lands there. A Ctrl tap in between breaks it.
+                        xtest.fake_input(d, X.KeyPress, ctrl)
+                        xtest.fake_input(d, X.KeyRelease, ctrl)
+                        d.sync()
+                        log.info('hotkey released before Alt: tapped Ctrl so the app does not open its menu bar')
+                        continue
                     if ev.type != X.KeyPress:
                         continue
                     action = grabbed.get((ev.detail, ev.state & _RELEVANT))
