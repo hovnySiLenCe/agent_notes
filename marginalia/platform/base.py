@@ -49,8 +49,10 @@ class Platform(ABC):
         `primary` is the X PRIMARY selection text, used to correct toolkits with unreliable offsets."""
 
     @abstractmethod
-    def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool) -> dict:
-        """worker: activate `target`, focus its chat input and paste (clipboard already prepared)."""
+    def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool,
+               at_cursor: bool = False) -> dict:
+        """worker: activate `target`, focus its chat input and paste (clipboard already prepared).
+        at_cursor: paste where the cursor is in the (already active) window instead: no input lookup, no ctrl+End."""
 
     @abstractmethod
     def track(self, reqs: list[dict], focus: set[str], moving: bool = False) -> dict:

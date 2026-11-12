@@ -342,6 +342,26 @@ def scenario_firefox(h: Harness) -> None:
     h.check('fill: original clipboard restored', restored, QGuiApplication.clipboard().text()[:60])
     h.shot('firefox_after_fill', xid)
 
+    # Alt+Return: the quotes only, typed where the cursor is (here: between a and b), wherever the focus is
+    con = sqlite3.connect(h.app_dir / 'data' / 'notes.db')         # re-check the sent ones (as on the panel)
+    con.execute('UPDATE annotations SET checked = 1')
+    con.commit()
+    con.close()
+    h.activate(xid)
+    h.pump(0.3)
+    Atspi.Component.grab_focus(entry)
+    h.pump(0.3)
+    for k in ('ctrl+a', 'a', 'b', 'Left'):                    # the box holds "ab", the cursor between a and b
+        h.key(k, xid)
+    h.pump(0.5)
+    rows = sorted(h.db(), key=lambda r: r['created_at'])
+    cfg, _ = cfgmod.Config.load(h.app_dir / 'config' / 'config.json')
+    plain = compose([Annotation(type_id=r['type_id'], quote=r['quote'], comment=r['comment']) for r in rows],
+                    cfg.type_map, cfg.prompt, plain=True) + ('\n' if cfg.prompt.get('trailing_newline') else '')
+    h.key('alt+Return', xid)
+    got = h.wait(lambda: (lambda t: t if t != 'ab' else None)(T.get_text(entry, 0, T.get_character_count(entry))), 6)
+    h.check('Alt+Return: pasted at the cursor', got == 'a' + plain + 'b', f'got={got!r}\nexpected={"a" + plain + "b"!r}')
+
 
 def scenario_terminal(h: Harness) -> None:
     print('[terminal] CLI agent output in gnome-terminal')

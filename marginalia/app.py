@@ -112,9 +112,13 @@ class Controller(QObject):
             self.begin_capture(action[5:])
         elif action in ('fill', 'fill_plain'):
             win = self.platform.active_window()
-            if win and win.pid != os.getpid():
+            here = win is not None and win.pid != os.getpid()
+            if here:
                 self._last_external = win
-            self.fill(plain=action == 'fill_plain')
+            if action == 'fill_plain':               # Alt+Return: at the cursor of the window in front
+                self.fill(plain=True, here=win if here else None)
+            else:
+                self.fill()
         elif action == 'toggle_panel':
             self.panel.toggle()
 
@@ -247,8 +251,9 @@ class Controller(QObject):
                                   wm_class=s.get('wm_class', ''), title=s.get('title', ''))
         return self._last_external
 
-    def fill(self, plain: bool = False) -> None:
-        """plain=True: only quotes + comments, without the header and per-type instructions."""
+    def fill(self, plain: bool = False, here: WindowInfo | None = None) -> None:
+        """plain=True: only quotes + comments, without the header and per-type instructions.
+        here: paste at the cursor of this (active) window instead of the annotations' chat input."""
         if self._busy:
             return
         items = self.panel.prompt_items()
@@ -257,7 +262,10 @@ class Controller(QObject):
             return
         text = self.compose(items, plain)
         cb = QGuiApplication.clipboard()
-        target = self._resolve_target(items) if self.cfg.fill.get('mode', 'fill') == 'fill' else None
+        if self.cfg.fill.get('mode', 'fill') != 'fill':
+            target = None
+        else:
+            target = here or self._resolve_target(items)
         if target is None:
             cb.setText(text, QClipboard.Clipboard)
             self._mark_sent(items)
@@ -274,7 +282,7 @@ class Controller(QObject):
         latest = max(items, key=lambda a: a.created_at)
         self._busy = True
         self.worker.submit(self.platform.inject, target, terminal, latest.anchor.get('path'),
-                           bool(self.cfg.fill.get('auto_send')),
+                           bool(self.cfg.fill.get('auto_send')) and here is None, here is not None,
                            cb=lambda res: self._on_injected(res, items, saved))
 
     def _on_injected(self, res, items: list[Annotation], saved: dict) -> None:

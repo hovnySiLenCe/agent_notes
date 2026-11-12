@@ -59,13 +59,14 @@ class X11Platform(Platform):
         from ..atspi.capture import capture_selection
         return capture_selection(win.pid, win.title, primary)
 
-    def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool) -> dict:
+    def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool,
+               at_cursor: bool = False) -> dict:
         keys.wait_keys_released()
         windows.activate(target.xid)
         if not windows.wait_active(target.xid, 1.2):
             return {'ok': False, 'reason': 'activate'}
         focused = None
-        if not terminal:
+        if not terminal and not at_cursor:
             try:
                 from ..atspi.inputs import focus_input
                 focused = focus_input(target.pid, target.title, anchor_path)
