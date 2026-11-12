@@ -74,8 +74,17 @@ class ConfigTest(unittest.TestCase):
             b = cfg.hotkey_bindings()
             self.assertEqual(b['type:mine'], 'Shift+Alt+M')
             self.assertEqual(b['menu'], 'Shift+Alt+S')
-            self.assertEqual(b['fill_plain'], 'Alt+Return')
+            self.assertEqual(b['fill_here'], 'Alt+Return')
+            self.assertNotIn('fill_plain', b)
             self.assertEqual(b['toggle_panel'], 'Shift+Alt+D')
+
+    def test_old_alt_return_becomes_fill_here(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'config.json'
+            p.write_text(json.dumps({'hotkeys': {'fill_plain': 'Alt+Return'}}), encoding='utf-8')
+            b = cfgmod.Config.load(p)[0].hotkey_bindings()
+            self.assertEqual(b['fill_here'], 'Alt+Return')       # Alt+Return used to paste the quotes only
+            self.assertNotIn('fill_plain', b)
 
     def test_broken_file_reports_error_and_uses_defaults(self):
         with tempfile.TemporaryDirectory() as d:

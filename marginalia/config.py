@@ -79,7 +79,8 @@ DEFAULT_TYPES = [   # the menu shows 4 per row; order = keys 1-9, 0
 
 DEFAULTS = {
     '_说明': {
-        'hotkeys': '全局快捷键：menu=批注菜单, fill=填入（带提示语和类型说明）, fill_plain=仅填入引用和批注, '
+        'hotkeys': '全局快捷键：menu=批注菜单, fill=填入来源窗口的输入框（带提示语和类型说明）, '
+                   'fill_here=同样的内容，输入在当前窗口的光标处, fill_plain=仅填入引用和批注, '
                    'toggle_panel=显示/隐藏面板；格式如 Shift+Alt+S，留空表示不绑定',
         'types': '批注类型（菜单每行 4 个，按 1-9、0 选前 10 个，其余用方向键）。input: none=直接保存 / optional=可选说明 / required=必须输入；'
                  'template 变量：{{quote}} {{comment}} {{name}}，{{#comment}}…{{/comment}} 表示有说明时才输出',
@@ -97,7 +98,7 @@ DEFAULTS = {
         'fill': 'mode: fill=自动填入输入框 / copy=只复制到剪贴板；target: source=批注来源窗口 / active=按快捷键时的当前窗口；'
                 'auto_send: 填入后自动按回车发送；mark_sent: 填入后把批注标记为已发送',
     },
-    'hotkeys': {'menu': 'Shift+Alt+S', 'fill': 'Shift+Alt+Return', 'fill_plain': 'Alt+Return',
+    'hotkeys': {'menu': 'Shift+Alt+S', 'fill': 'Shift+Alt+Return', 'fill_here': 'Alt+Return', 'fill_plain': '',
                 'toggle_panel': 'Shift+Alt+D'},
     'types': DEFAULT_TYPES,
     'prompt': {'header': '请根据以下批注，修改或补充你上一条回复：', 'footer': '', 'quote_max_chars': 160,
@@ -156,6 +157,9 @@ class Config:
             path.write_text(json.dumps(DEFAULTS, ensure_ascii=False, indent=2), encoding='utf-8')
         try:
             user = json.loads(path.read_text(encoding='utf-8'))
+            hk = user.get('hotkeys') if isinstance(user, dict) else None
+            if isinstance(hk, dict) and 'fill_here' not in hk and hk.get('fill_plain') == 'Alt+Return':
+                hk['fill_plain'], hk['fill_here'] = '', 'Alt+Return'    # Alt+Return used to be fill_plain
             return cls(_merge(DEFAULTS, user)), None
         except (ValueError, TypeError, KeyError) as e:
             return cls(copy.deepcopy(DEFAULTS)), f'配置文件有误，已使用默认配置：{e}'

@@ -174,8 +174,9 @@ class PanelOpacityTest(unittest.TestCase):
         self.assertEqual(short_hotkey('Shift+Alt+Return'), '⇧⌥↵')
         self.assertEqual(short_hotkey('Alt+Return'), '⌥↵')
         self.panel.refresh()
-        self.assertTrue(self.panel._plain_btn.text().endswith('⌥↵'))
+        self.assertEqual(self.panel._plain_btn.text(), '仅引用')          # no hotkey by default
         self.assertTrue(self.panel._fill_btn.text().endswith('⇧⌥↵'))
+        self.assertIn('Alt+Return', self.panel._fill_btn.toolTip())       # fill_here: same, at the cursor
 
     def test_hide_tooltip_follows_hotkey_config(self):
         self.panel.refresh()

@@ -110,15 +110,15 @@ class Controller(QObject):
             self.begin_capture(None)
         elif action.startswith('type:'):
             self.begin_capture(action[5:])
-        elif action in ('fill', 'fill_plain'):
+        elif action in ('fill', 'fill_here', 'fill_plain'):
             win = self.platform.active_window()
             here = win is not None and win.pid != os.getpid()
             if here:
                 self._last_external = win
-            if action == 'fill_plain':               # Alt+Return: at the cursor of the window in front
-                self.fill(plain=True, here=win if here else None)
+            if action == 'fill_here':                # Alt+Return: at the cursor of the window in front
+                self.fill(here=win if here else None)
             else:
-                self.fill()
+                self.fill(plain=action == 'fill_plain')
         elif action == 'toggle_panel':
             self.panel.toggle()
 

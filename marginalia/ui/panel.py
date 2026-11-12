@@ -489,6 +489,8 @@ class FloatingPanel(QWidget):
         self._plain_btn.setEnabled(n > 0)
         self._fill_btn.setText((f'填入 {n} 条' if n else '填入') + fill_key)
         self._plain_btn.setText('仅引用' + plain_key)
+        here = f"；{hk['fill_here']}：同样的内容输入在当前窗口的光标处" if hk.get('fill_here') else ''
+        self._fill_btn.setToolTip('填入完整 prompt（提示语 + 每条批注的类型说明）' + here)
         self._update_preview(items)
 
     # ---- original-text highlights ---------------------------------------------------------------------------
