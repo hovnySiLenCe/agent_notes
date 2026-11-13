@@ -169,6 +169,29 @@ class PanelOpacityTest(unittest.TestCase):
         self.panel.set_collapsed(True)
         self.assertAlmostEqual(self.panel.target_opacity(), 0.15)
 
+    def test_checking_a_card_keeps_the_scroll_position(self):
+        """Ticking a card rebuilds the list: it must not jump (the focused checkbox goes away)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from marginalia.core.models import Annotation
+        for i in range(14):
+            self.ctl.store.add(Annotation(type_id='ask', quote=f'引用 {i} ' * 6, comment='说明'))
+        self.ctl.store.subscribe(self.panel.refresh)
+        self.panel.refresh()
+        self.panel.show()
+        QApplication.processEvents()
+        bar = self.panel._scroll.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 0)
+        bar.setValue(bar.maximum() // 3)
+        QApplication.processEvents()
+        before = bar.value()
+        visible = [c for c in self.panel._list._cards if not c.visibleRegion().isEmpty()]
+        check = visible[1].check
+        QTest.mouseClick(check, Qt.LeftButton, pos=check.rect().center())
+        for _ in range(5):
+            QApplication.processEvents()
+        self.assertEqual(bar.value(), before)
+
     def test_button_labels_follow_hotkeys(self):
         from marginalia.ui.panel import short_hotkey
         self.assertEqual(short_hotkey('Shift+Alt+Return'), '⇧⌥↵')
