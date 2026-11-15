@@ -8,11 +8,11 @@ from PySide6.QtCore import QEvent, QMimeData, QPoint, QPropertyAnimation, QRect,
 from PySide6.QtGui import QColor, QCursor, QDrag, QGuiApplication, QIcon, QPainter
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
                                QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
-                               QSizeGrip, QToolButton, QVBoxLayout, QWidget)
+                               QSizeGrip, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.models import PENDING, RESOLVED, SENT, Annotation, AnnoType
 from .icons import icon, pixmap
-from .theme import C, add_shadow, margin, quote_block, rgba, type_tag_style
+from .theme import C, quote_block, rgba, type_tag_style
 
 if TYPE_CHECKING:
     from ..app import Controller
@@ -22,7 +22,7 @@ MIN_SIZE = (300, 160)          # expanded panel's frame: room for the header and
 
 
 def min_size() -> tuple[int, int]:
-    return MIN_SIZE[0] + 2 * margin(), MIN_SIZE[1] + 2 * margin()
+    return MIN_SIZE
 APP_NAMES = {'firefox': 'Firefox', 'firefox_firefox': 'Firefox', 'code': 'VS Code', 'google-chrome': 'Chrome', 'chromium': 'Chromium',
              'chromium-browser': 'Chromium', 'gnome-terminal-server': '终端', 'cursor': 'Cursor'}
 
@@ -70,10 +70,11 @@ class Card(QFrame):
         name.setStyleSheet(type_tag_style(atype.color))
         src = QLabel(_elide(app_label(ann.source), 18), objectName='faint')
         src.setToolTip(source_label(ann.source, 200))
+        src.setMinimumWidth(0)                        # gives way first when the row is narrow …
+        src.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # … the action buttons never do
         top.addWidget(self.check)
         top.addWidget(name)
-        top.addWidget(src)
-        top.addStretch(1)
+        top.addWidget(src, 1)
         if ann.status == SENT:
             top.addWidget(QLabel('已发送', objectName='badge'))
         elif ann.status == RESOLVED:
@@ -110,6 +111,7 @@ class Card(QFrame):
         b.setToolTip(tip)
         b.setCursor(Qt.PointingHandCursor)
         b.setFocusPolicy(Qt.NoFocus)
+        b.setFixedSize(22, 22)
         b.clicked.connect(slot)
         sp = b.sizePolicy()
         sp.setRetainSizeWhenHidden(True)      # no layout jump when it appears on hover
@@ -296,9 +298,9 @@ class FloatingPanel(QWidget):
         self._save_timer = QTimer(self, singleShot=True, interval=600, timeout=self._save_geometry)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(margin(), margin(), margin(), margin())
+        outer.setContentsMargins(0, 0, 0, 0)       # (no drop shadow: blurring the whole panel on every repaint
+                                                   #  made expanding and hovering sluggish at 2x scaling)
         frame = QFrame(objectName='panel')
-        add_shadow(frame)
         outer.addWidget(frame)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -661,10 +663,10 @@ class FloatingPanel(QWidget):
             self.setMinimumSize(0, 0)
             self._fit_bar()
         else:
-            self.setMinimumSize(*min_size())
             self.setMaximumSize(16777215, 16777215)
-            self._body.show()
+            self.setMinimumSize(*min_size())
             self.setGeometry(self._expanded_geo)
+            self._body.show()
         # The window manager may still report the old size for a moment (seen: the collapsed bar's size
         # clamped to the minimum got saved as the panel size, leaving no room for the list): don't save
         # sizes from that window, and re-apply the expanded size once it has settled.
@@ -675,12 +677,11 @@ class FloatingPanel(QWidget):
         self._save_timer.start()
 
     def _fit_bar(self) -> None:
-        """Size the collapsed bar to its header (the count in it changes), keeping the panel's right edge."""
+        """Collapse vertically to the header while preserving the full panel's width and position."""
         self._header.layout().activate()
-        w = max(self._header.sizeHint().width() + 8, 200) + 2 * margin()
-        h = self._header.sizeHint().height() + 2 + 2 * margin()
-        self.setFixedSize(w, h)
-        self.move(self._expanded_geo.right() - w + 1, self._expanded_geo.y())
+        h = self._header.sizeHint().height() + 2
+        self.setFixedSize(self._expanded_geo.width(), h)
+        self.move(self._expanded_geo.topLeft())
 
     def _settle(self) -> None:
         if not self._collapsed and self.size() != self._expanded_geo.size():
@@ -766,9 +767,9 @@ class FloatingPanel(QWidget):
             self.set_pinned(not self._pinned)
 
     def moveEvent(self, e) -> None:
-        if self._collapsed:   # dragging the bar moves where the full panel will open (right-aligned)
+        if self._collapsed:   # dragging the bar moves where the full panel will open
             g = self._expanded_geo
-            self._expanded_geo = QRect(self.x() + self.width() - g.width(), self.y(), g.width(), g.height())
+            self._expanded_geo = QRect(self.x(), self.y(), g.width(), g.height())
         self._save_timer.start()
         super().moveEvent(e)
 

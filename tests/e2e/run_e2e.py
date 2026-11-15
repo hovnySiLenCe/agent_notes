@@ -237,7 +237,22 @@ class Harness:
             return
 
     def select_text(self, pids: set[int], quote: str) -> bool:
-        """Like a fresh mouse selection: drop any previous selection, then select `quote`."""
+        """Like a fresh mouse selection: drop any previous selection, then select `quote`. Checked again a moment
+        later: a window that is just getting the focus back (after our popup) may drop a selection set early."""
+        for _ in range(3):
+            node = self._select_once(pids, quote)
+            if node is None:
+                return False
+            self.pump(0.3)
+            try:
+                if T.get_n_selections(node) and T.get_text(node, *(lambda r: (r.start_offset, r.end_offset))(
+                        T.get_selection(node, 0))) == quote:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _select_once(self, pids: set[int], quote: str):
         desk = Atspi.get_desktop(0)
         for a in (desk.get_child_at_index(i) for i in range(desk.get_child_count())):
             if a is None or a.get_process_id() not in pids:
@@ -260,10 +275,10 @@ class Harness:
                     continue
                 i = s.find(quote)
                 if i >= 0:
-                    if T.get_n_selections(node):
-                        return T.set_selection(node, 0, i, i + len(quote))
-                    return T.add_selection(node, i, i + len(quote))
-        return False
+                    ok = (T.set_selection(node, 0, i, i + len(quote)) if T.get_n_selections(node)
+                          else T.add_selection(node, i, i + len(quote)))
+                    return node if ok else None
+        return None
 
     def find_entry(self, pids: set[int], name_part: str):
         desk = Atspi.get_desktop(0)

@@ -36,17 +36,40 @@ class PanelOpacityTest(unittest.TestCase):
         self.panel.deleteLater()
         self.tmp.cleanup()
 
-    def test_collapse_keeps_right_edge_and_restores(self):
+    def test_collapse_only_changes_height_and_restores(self):
         full = self.panel.geometry()
         self.panel.set_collapsed(True)
         bar = self.panel.geometry()
         self.assertLess(bar.height(), 80)
-        self.assertLess(bar.width(), full.width())
-        self.assertEqual(bar.right(), full.right())
+        self.assertEqual(bar.width(), full.width())
+        self.assertEqual(bar.topLeft(), full.topLeft())
         self.assertAlmostEqual(self.panel.target_opacity(), 0.5)      # collapsed bar: see-through
         self.panel.set_collapsed(False)
         self.assertEqual(self.panel.geometry(), full)
         self.assertAlmostEqual(self.panel.target_opacity(), 0.96)     # full panel: solid
+
+    def test_collapsed_refresh_and_drag_preserve_custom_width(self):
+        from PySide6.QtCore import QPoint, QRect
+        from marginalia.core.models import Annotation
+        self.panel.resize(520, 640)
+        self.panel.show()
+        QApplication.processEvents()
+        full = self.panel.geometry()
+        self.panel.set_collapsed(True)
+        destination = full.topLeft() + QPoint(25, 30)
+        self.panel.move(destination)
+        QApplication.processEvents()
+        self.ctl.store.add(Annotation('ask', '引用'))
+        self.panel.refresh()                         # a new count must not resize the bar horizontally
+        self.assertEqual(self.panel.width(), full.width())
+        self.assertEqual(self.panel.pos(), destination)
+        self.panel._settle_until = 0
+        self.panel._save_geometry()
+        self.assertEqual(self.ctl.state['panel']['w'], full.width())
+        self.assertEqual(self.ctl.state['panel']['h'], full.height())
+        self.panel.set_collapsed(False)
+        self.assertEqual(self.panel.geometry(), QRect(destination, full.size()))
+        self.assertFalse(self.panel._body.isHidden())
 
     def test_broken_saved_size_is_repaired(self):
         self.ctl.state['panel'] = {'x': 400, 'y': 300, 'w': 300, 'h': 64}    # the list had no room left

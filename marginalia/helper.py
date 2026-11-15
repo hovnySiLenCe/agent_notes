@@ -23,6 +23,8 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 CALL_TIMEOUT = 15.0      # s; a call that takes longer is treated as hung (the helper is killed)
+RECYCLE_S = 600.0        # s; an older helper is replaced before its next background call (see Helper.call)
+BACKGROUND = {'track'}   # calls that may pay for a fresh helper's start (the user isn't waiting on them)
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -37,6 +39,7 @@ class Helper:
         self.own_pid = own_pid
         self._proc: subprocess.Popen | None = None
         self._conn: Connection | None = None
+        self._started = 0.0
         self.restarts = 0
 
     def _start(self) -> None:
@@ -47,6 +50,7 @@ class Helper:
                                       stdin=subprocess.DEVNULL)
         child.close()
         self._conn = Connection(parent.detach())
+        self._started = time.monotonic()
 
     def _stop(self) -> None:
         if self._conn is not None:
@@ -59,6 +63,11 @@ class Helper:
             self._proc = None
 
     def call(self, name: str, *args):
+        # libatspi keeps a copy of apps' trees (Chromium's in full) and needs their change signals to keep it
+        # right; a long-lived process ends up asking about nodes that are gone (seen: VS Code captures and
+        # highlights failing after a day). A fresh helper every few minutes, swapped in on a background call.
+        if self._proc is not None and name in BACKGROUND and time.monotonic() - self._started > RECYCLE_S:
+            self._stop()
         if self._proc is None or self._proc.poll() is not None:
             if self._proc is not None:
                 self._stop()
@@ -93,8 +102,15 @@ def _serve(fd: int, own_pid: int) -> None:
     from .platform.base import get_platform
     platform = get_platform(own_pid)
     conn = Connection(fd)
+    from gi.repository import GLib
+    ctx = GLib.MainContext.default()
     while True:
         try:
+            while not conn.poll(0.05):     # meanwhile deliver libatspi's D-Bus signals (its cache updates)
+                for _ in range(1000):
+                    if not ctx.pending():
+                        break
+                    ctx.iteration(False)
             name, args = conn.recv()
         except (EOFError, OSError):                         # the main process went away
             return

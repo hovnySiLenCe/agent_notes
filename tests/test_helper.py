@@ -3,6 +3,7 @@ import signal
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from marginalia import helper as helpermod
 from marginalia.helper import Helper, HelperError
@@ -44,6 +45,14 @@ class HelperTest(unittest.TestCase):
             self.assertTrue(self.h.call('is_terminal', TERM))   # detected before sending: new helper
         except HelperError:
             self.assertTrue(self.h.call('is_terminal', TERM))   # or the call fails and the next one works
+
+    def test_old_helper_is_replaced_on_a_background_call(self):
+        self.h.call('is_terminal', TERM)
+        first = self.h._proc.pid
+        with mock.patch.object(helpermod, 'RECYCLE_S', 0.0), mock.patch.object(helpermod, 'BACKGROUND', {'is_terminal'}):
+            self.assertTrue(self.h.call('is_terminal', TERM))
+        self.assertNotEqual(self.h._proc.pid, first)
+        self.assertTrue(self.h.call('is_terminal', TERM))     # (not a background call: no new one)
 
     def test_hung_helper_is_killed_and_replaced(self):
         self.h.call('is_terminal', TERM)

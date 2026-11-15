@@ -18,12 +18,39 @@ def _common_prefix(a: tuple, b: list) -> int:
     return n
 
 
+_last: dict[tuple, tuple] = {}         # (pid, window title) -> path of the input box chosen last time
+
+
+def _usable(node) -> bool:
+    try:
+        st = node.get_state_set()
+        return st.contains(S.EDITABLE) and st.contains(S.FOCUSABLE) and 'Text' in (node.get_interfaces() or [])
+    except Exception:
+        return False
+
+
 def find_input(pid: int | None, title: str, anchor_path: list | None, budget: float = 1.2):
     """Editable text boxes inside web content (never browser chrome such as the URL bar), ranked by:
-    same document as the annotated text > looks like a chat box > already focused > lowest on screen."""
+    same document as the annotated text > looks like a chat box > already focused > lowest on screen.
+    The box found last time in this window is tried first: walking the whole tree takes up to a second."""
     frame = frame_for(pid, title)
     if frame is None:
         return None
+    from .locate import node_at
+    cached = _last.get((pid, title))
+    if cached is not None:
+        node, _, doc = node_at(frame, cached)
+        same_doc = not anchor_path or node_at(frame, anchor_path)[2] in ((), doc)
+        if node is not None and same_doc and _usable(node):
+            return node
+    found = _search(frame, anchor_path, budget)
+    if found is not None:
+        _last[(pid, title)] = found[1]
+        return found[0]
+    return None
+
+
+def _search(frame, anchor_path: list | None, budget: float):
     for prune in (True, False):        # visible inputs first; then allow off-screen ones
         best, best_score = None, None
         for node, path, in_doc in walk(frame, time.monotonic() + budget, prune_hidden=prune):
@@ -42,7 +69,7 @@ def find_input(pid: int | None, title: str, anchor_path: list | None, budget: fl
             score = (_common_prefix(path, anchor_path or []), bool(_CHAT_HINT.search(name)),
                      st.contains(S.FOCUSED), y)
             if best_score is None or score > best_score:
-                best, best_score = node, score
+                best, best_score = (node, path), score
         if best is not None:
             return best
     return None

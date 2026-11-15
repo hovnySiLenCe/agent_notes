@@ -176,11 +176,17 @@ class Controller(QObject):
         primary = ''
         if self.platform.selection_belongs_to(win):
             primary = QGuiApplication.clipboard().text(QClipboard.Selection) or self.platform.read_selection()
+        if primary.strip():
+            # The text is known: open the popup now. Where it sits in the window (for the highlight) takes a walk
+            # over the whole accessibility tree, up to a second in VS Code: that finishes in the background.
+            ctx = self._on_captured(win, primary, type_id, None, pending=True)
+            self.worker.submit(self.platform.capture_selection, win, primary, cb=lambda res: self._refine(ctx, res))
+            return
         self._busy = True
         self.worker.submit(self.platform.capture_selection, win, primary,
                            cb=lambda res: self._on_captured(win, primary, type_id, res))
 
-    def _on_captured(self, win: WindowInfo, primary: str, type_id: str | None, res) -> None:
+    def _on_captured(self, win: WindowInfo, primary: str, type_id: str | None, res, pending: bool = False) -> dict:
         self._busy = False
         if isinstance(res, Exception) or not res:
             res = None
@@ -188,9 +194,32 @@ class Controller(QObject):
         quote = anchor.pop('quote', '') or primary.strip()
         source = {'xid': win.xid, 'pid': win.pid, 'wm_class': win.wm_class, 'title': win.title,
                   'app': anchor.pop('app', ''), 'url': anchor.pop('url', '')}
-        log.info('captured via %s: %r from %s', anchor.get('method'), quote[:60], win.wm_class)
+        if not pending:
+            log.info('captured via %s: %r from %s', anchor.get('method'), quote[:60], win.wm_class)
         t = self.cfg.type_map.get(type_id) if type_id else None
-        self._capture_ctx = {'win': win, 'quote': quote, 'anchor': anchor, 'source': source}
+        ctx = self._capture_ctx = {'win': win, 'quote': quote, 'anchor': anchor, 'source': source, 'pending': pending}
+        self._open_capture(ctx, type_id, t)
+        return ctx
+
+    def _refine(self, ctx: dict, res) -> None:
+        """The background capture of a popup opened from PRIMARY: its anchor goes into the popup's context,
+        or into the annotation if it was saved meanwhile; without one, search the tree for the text."""
+        ctx['pending'] = False
+        ok = isinstance(res, dict) and res.get('method') == 'atspi'
+        log.info('captured via %s: %r from %s', 'atspi' if ok else 'primary', ctx['quote'][:60], ctx['win'].wm_class)
+        ann_id = ctx.get('ann_id')
+        if ok:
+            anchor = {k: v for k, v in res.items() if k not in ('quote', 'app', 'url')}
+            source = dict(ctx['source'], app=res.get('app', ''), url=res.get('url', ''))
+            if ann_id is None:
+                ctx['anchor'], ctx['source'] = anchor, source
+            elif self.store.get(ann_id) is not None:
+                self.store.update(ann_id, anchor=anchor, source=source)
+        elif ann_id is not None:
+            self._late_anchor(ann_id, ctx['win'], ctx['quote'])
+
+    def _open_capture(self, ctx: dict, type_id: str | None, t) -> None:
+        quote, source = ctx['quote'], ctx['source']
         if t is not None and t.input == INPUT_NONE and quote:
             self._on_popup_submitted(t.id, '')
             return
@@ -206,9 +235,13 @@ class Controller(QObject):
         self.panel.reveal()
         self.toast.show_message(f'已添加批注 · {name}', 'ok', 1400, near=self.panel)
         self.worker.submit(self.platform.activate, ctx['win'].xid)   # hand focus back to where the user was
-        if a.anchor.get('method') != 'atspi' and a.quote.strip():
-            self.worker.submit(self.platform.late_anchor, ctx['win'], a.quote,
-                               cb=lambda res, ann_id=a.id, win=ctx['win']: self._on_late_anchor(ann_id, win, res))
+        ctx['ann_id'] = a.id
+        if a.anchor.get('method') != 'atspi' and a.quote.strip() and not ctx.get('pending'):
+            self._late_anchor(a.id, ctx['win'], a.quote)
+
+    def _late_anchor(self, ann_id: str, win: WindowInfo, quote: str) -> None:
+        self.worker.submit(self.platform.late_anchor, win, quote,
+                           cb=lambda res: self._on_late_anchor(ann_id, win, res))
 
     def _on_late_anchor(self, ann_id: str, win: WindowInfo, res) -> None:
         if isinstance(res, dict):
