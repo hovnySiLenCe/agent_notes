@@ -54,9 +54,14 @@ class Platform(ABC):
 
     @abstractmethod
     def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool,
-               at_cursor: bool = False) -> dict:
+               at_cursor: bool = False, input_hint: list | None = None) -> dict:
         """worker: activate `target`, focus its chat input and paste (clipboard already prepared).
-        at_cursor: paste where the cursor is in the (already active) window instead: no input lookup, no ctrl+End."""
+        at_cursor: paste where the cursor is in the (already active) window instead: no input lookup, no ctrl+End.
+        input_hint: where the input box was last time in this window (the result's 'input_path')."""
+
+    def input_path(self, target: WindowInfo, anchor_path: list | None) -> list | None:
+        """worker: find the chat input box ahead of time; returns a hint for inject (None if not found)."""
+        return None
 
     @abstractmethod
     def track(self, reqs: list[dict], focus: set[str], moving: bool = False) -> dict:

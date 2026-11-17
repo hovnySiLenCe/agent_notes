@@ -18,7 +18,8 @@ def _common_prefix(a: tuple, b: list) -> int:
     return n
 
 
-_last: dict[tuple, tuple] = {}         # (pid, window title) -> path of the input box chosen last time
+_last: dict[tuple, tuple] = {}         # (pid, xid) -> path of the input box chosen last time in that window
+                                       # (by window, not title: VS Code's title changes with every open file)
 
 
 def _usable(node) -> bool:
@@ -29,25 +30,29 @@ def _usable(node) -> bool:
         return False
 
 
-def find_input(pid: int | None, title: str, anchor_path: list | None, budget: float = 1.2):
-    """Editable text boxes inside web content (never browser chrome such as the URL bar), ranked by:
-    same document as the annotated text > looks like a chat box > already focused > lowest on screen.
-    The box found last time in this window is tried first: walking the whole tree takes up to a second."""
+def find_input(pid: int | None, title: str, anchor_path: list | None, budget: float = 1.2, xid: int = 0,
+               hint: list | None = None):
+    """(node, path) of the chat input box, or None. Editable text boxes inside web content (never browser chrome
+    such as the URL bar), ranked by: same document as the annotated text > looks like a chat box > already
+    focused > lowest on screen. The box found last time in this window (or `hint`, the caller's memory of it,
+    which survives helper restarts) is tried first: walking the whole tree takes a quarter to a full second."""
     frame = frame_for(pid, title)
     if frame is None:
         return None
     from .locate import node_at
-    cached = _last.get((pid, title))
-    if cached is not None:
+    for cached in (_last.get((pid, xid)), hint):
+        if not cached:
+            continue
+        cached = tuple(cached)
         node, _, doc = node_at(frame, cached)
         same_doc = not anchor_path or node_at(frame, anchor_path)[2] in ((), doc)
         if node is not None and same_doc and _usable(node):
-            return node
+            _last[(pid, xid)] = cached
+            return node, cached
     found = _search(frame, anchor_path, budget)
     if found is not None:
-        _last[(pid, title)] = found[1]
-        return found[0]
-    return None
+        _last[(pid, xid)] = tuple(found[1])
+    return found
 
 
 def _search(frame, anchor_path: list | None, budget: float):
@@ -75,13 +80,23 @@ def _search(frame, anchor_path: list | None, budget: float):
     return None
 
 
-def focus_input(pid: int | None, title: str, anchor_path: list | None) -> str | None:
-    node = find_input(pid, title, anchor_path)
-    if node is None:
+def focus_input(pid: int | None, title: str, anchor_path: list | None, xid: int = 0,
+                hint: list | None = None) -> dict | None:
+    """Focus the chat input: {'name', 'path', 'grabbed' (focus had to be moved there)} or None."""
+    found = find_input(pid, title, anchor_path, xid=xid, hint=hint)
+    if found is None:
         return None
+    node, path = found
     st = node.get_state_set()
     if not st.contains(S.SHOWING):
         Atspi.Component.scroll_to(node, Atspi.ScrollType.ANYWHERE)
-    if not st.contains(S.FOCUSED):
+    grabbed = not st.contains(S.FOCUSED)
+    if grabbed:
         Atspi.Component.grab_focus(node)
-    return node.get_name() or node.get_role_name()
+    return {'name': node.get_name() or node.get_role_name(), 'path': list(path), 'grabbed': grabbed}
+
+
+def input_path(pid: int | None, title: str, anchor_path: list | None, xid: int = 0) -> list | None:
+    """Look the input box up ahead of time (no focus change), so the next fill finds it at once."""
+    found = find_input(pid, title, anchor_path, xid=xid)
+    return list(found[1]) if found else None

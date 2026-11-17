@@ -6,6 +6,7 @@ import logging
 import os
 import signal
 import sys
+import time
 
 from PySide6.QtCore import QMimeData, QObject, QTimer, QUrl, QFileSystemWatcher
 from PySide6.QtGui import QClipboard, QCursor, QDesktopServices, QGuiApplication
@@ -64,6 +65,7 @@ class Controller(QObject):
         self.highlighter.states_changed.connect(self.panel.update_locate_states)
         self.store.subscribe(self.highlighter.poke)
         self._capture_ctx: dict | None = None
+        self._input_paths: dict[int, list] = {}       # window -> where its chat input box was last found
         self._busy = False
         self._last_external: WindowInfo | None = None
         self._hinted: set[str] = set()                    # apps already told how to enable accessibility
@@ -183,7 +185,7 @@ class Controller(QObject):
             self.worker.submit(self.platform.capture_selection, win, primary, cb=lambda res: self._refine(ctx, res))
             return
         self._busy = True
-        self.worker.submit(self.platform.capture_selection, win, primary,
+        self.worker.submit(self.platform.capture_selection, win, primary, urgent=True,
                            cb=lambda res: self._on_captured(win, primary, type_id, res))
 
     def _on_captured(self, win: WindowInfo, primary: str, type_id: str | None, res, pending: bool = False) -> dict:
@@ -234,10 +236,21 @@ class Controller(QObject):
         name = self.cfg.type_map[type_id].name if type_id in self.cfg.type_map else type_id
         self.panel.reveal()
         self.toast.show_message(f'已添加批注 · {name}', 'ok', 1400, near=self.panel)
-        self.worker.submit(self.platform.activate, ctx['win'].xid)   # hand focus back to where the user was
+        self.worker.submit(self.platform.activate, ctx['win'].xid, urgent=True)   # focus back where the user was
         ctx['ann_id'] = a.id
+        self._prepare_input(ctx['win'], a.anchor.get('path'))
         if a.anchor.get('method') != 'atspi' and a.quote.strip() and not ctx.get('pending'):
             self._late_anchor(a.id, ctx['win'], a.quote)
+
+    def _prepare_input(self, win: WindowInfo, anchor_path: list | None) -> None:
+        """Find the window's chat input in the background now, so filling later doesn't walk its whole tree."""
+        if win.xid in self._input_paths or self.platform.is_terminal(win):
+            return
+
+        def done(path):
+            if isinstance(path, list) and path:
+                self._input_paths[win.xid] = path
+        self.worker.submit(self.platform.input_path, win, anchor_path, cb=done)
 
     def _late_anchor(self, ann_id: str, win: WindowInfo, quote: str) -> None:
         self.worker.submit(self.platform.late_anchor, win, quote,
@@ -270,7 +283,7 @@ class Controller(QObject):
     def _on_popup_cancelled(self) -> None:
         ctx, self._capture_ctx = self._capture_ctx, None
         if ctx is not None:
-            self.worker.submit(self.platform.activate, ctx['win'].xid)
+            self.worker.submit(self.platform.activate, ctx['win'].xid, urgent=True)
 
     # ---- compose & fill -----------------------------------------------------------------------------------------
     def compose(self, items: list[Annotation], plain: bool = False) -> str:
@@ -314,14 +327,20 @@ class Controller(QObject):
             saved[QClipboard.Selection] = _copy_mime(cb.mimeData(QClipboard.Selection))
             cb.setText(text, QClipboard.Selection)
         latest = max(items, key=lambda a: a.created_at)
+        started = time.monotonic()
         self._busy = True
         self.worker.submit(self.platform.inject, target, terminal, latest.anchor.get('path'),
                            bool(self.cfg.fill.get('auto_send')) and here is None, here is not None,
-                           cb=lambda res: self._on_injected(res, items, saved))
+                           self._input_paths.get(target.xid), urgent=True,
+                           cb=lambda res: self._on_injected(res, items, saved, target, started))
 
-    def _on_injected(self, res, items: list[Annotation], saved: dict) -> None:
+    def _on_injected(self, res, items: list[Annotation], saved: dict, target: WindowInfo | None = None,
+                     started: float = 0.0) -> None:
         self._busy = False
+        if isinstance(res, dict) and res.get('input_path') and target is not None:
+            self._input_paths[target.xid] = res['input_path']
         if isinstance(res, dict) and res.get('ok'):
+            log.info('fill took %.0f ms: %s', (time.monotonic() - started) * 1000, res.get('ms'))
             def restore():
                 for mode, md in saved.items():
                     QGuiApplication.clipboard().setMimeData(md, mode)

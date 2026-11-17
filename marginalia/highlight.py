@@ -216,7 +216,7 @@ class Highlighter(QObject):
         if not xid or not self.ctl.platform.window_exists(xid):
             self.ctl.toast.show_message('来源窗口已关闭', 'warn', near=self.ctl.panel)
             return
-        self.ctl.worker.submit(self.ctl.platform.activate, xid)
+        self.ctl.worker.submit(self.ctl.platform.activate, xid, urgent=True)
         if req is None:            # captured without an anchor: switching to the window is all we can do
             return
 
@@ -226,4 +226,4 @@ class Highlighter(QObject):
             else:
                 self.ctl.toast.show_message('未在原窗口中找到这段原文（可能已关闭页面或内容已变）', 'warn', 2600,
                                             near=self.ctl.panel)
-        self.ctl.worker.submit(self.ctl.platform.reveal, req, cb=done)
+        self.ctl.worker.submit(self.ctl.platform.reveal, req, cb=done, urgent=True)

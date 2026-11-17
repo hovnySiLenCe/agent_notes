@@ -26,7 +26,7 @@ class FakeWorker:
     def __init__(self):
         self.calls = []
 
-    def submit(self, fn, *args, cb=None):
+    def submit(self, fn, *args, cb=None, urgent=False):
         self.calls.append((fn, args))
         if cb:
             cb(fn(*args))

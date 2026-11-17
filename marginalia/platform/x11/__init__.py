@@ -63,19 +63,32 @@ class X11Platform(Platform):
         return capture_selection(win.pid, win.title, primary)
 
     def inject(self, target: WindowInfo, terminal: bool, anchor_path: list | None, auto_send: bool,
-               at_cursor: bool = False) -> dict:
-        keys.wait_keys_released()
-        windows.activate(target.xid)
-        if not windows.wait_active(target.xid, 1.2):
-            return {'ok': False, 'reason': 'activate'}
+               at_cursor: bool = False, input_hint: list | None = None) -> dict:
+        # Everything that doesn't type is done while the user may still be holding the hotkey; only the keys
+        # we send have to wait for its release.
+        t0 = time.monotonic()
+        steps = {}
+
+        def mark(name):
+            steps[name] = round((time.monotonic() - t0) * 1000)
+        if windows.active_xid() != target.xid:
+            windows.activate(target.xid)
+            if not windows.wait_active(target.xid, 1.2):
+                return {'ok': False, 'reason': 'activate'}
+        mark('active')
         focused = None
         if not terminal and not at_cursor:
             try:
                 from ..atspi.inputs import focus_input
-                focused = focus_input(target.pid, target.title, anchor_path)
+                focused = focus_input(target.pid, target.title, anchor_path, target.xid, input_hint)
             except Exception:
                 focused = None
-            time.sleep(0.15)
+            mark('input')
+        settle = time.monotonic() if focused and focused['grabbed'] else 0.0
+        keys.wait_keys_released()
+        mark('released')
+        if settle:                                        # let the app move its focus before we type
+            time.sleep(max(0.0, settle + 0.15 - time.monotonic()))
         if windows.active_xid() != target.xid:          # never type into a window the user switched to
             return {'ok': False, 'reason': 'focus_lost'}
         if terminal:
@@ -84,10 +97,16 @@ class X11Platform(Platform):
             if focused:
                 keys.send('ctrl+End')                   # append after any draft the user already typed
             keys.send('ctrl+v')
+        mark('pasted')
         if auto_send:
             time.sleep(0.35)
             keys.send('Return')
-        return {'ok': True, 'input': focused}
+        return {'ok': True, 'input': focused and focused['name'], 'input_path': focused and focused['path'],
+                'ms': steps}
+
+    def input_path(self, target: WindowInfo, anchor_path: list | None) -> list | None:
+        from ..atspi.inputs import input_path
+        return input_path(target.pid, target.title, anchor_path, target.xid)
 
     def anchor_from_text(self, win: WindowInfo, quote: str) -> dict | None:
         from ..atspi.locate import anchor_from_text
