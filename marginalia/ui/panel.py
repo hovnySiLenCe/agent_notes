@@ -334,6 +334,7 @@ class FloatingPanel(QWidget):
         self._bubble_action.toggled.connect(lambda on: ctl.set_bubble_enabled(on))
         menu.aboutToShow.connect(self._sync_menu)
         menu.addSeparator()
+        menu.addAction('设置…', ctl.open_settings)
         menu.addAction('打开配置文件', ctl.open_config)
         menu.addAction('重新加载配置', ctl.reload_config)
         menu.addSeparator()

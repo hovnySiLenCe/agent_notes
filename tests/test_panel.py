@@ -29,7 +29,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.ctl = SimpleNamespace(cfg=cfgmod.Config(json.loads(json.dumps(cfgmod.DEFAULTS))),
                                    state={'panel': {'x': 400, 'y': 300, 'w': 380, 'h': 560}},
                                    store=Store(Path(self.tmp.name) / 'n.db'), compose=lambda items: '',
-                                   open_config=noop, reload_config=noop, quit=noop, fill=noop, save_state=noop)
+                                   open_config=noop, open_settings=noop, reload_config=noop, quit=noop, fill=noop, save_state=noop)
         self.panel = FloatingPanel(self.ctl)
 
     def tearDown(self):

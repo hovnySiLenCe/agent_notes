@@ -38,6 +38,7 @@ def make_tray(ctl: 'Controller') -> QSystemTrayIcon | None:
     tray.setToolTip('Marginalia')
     menu = QMenu()
     menu.addAction('显示 / 隐藏面板', ctl.panel.toggle)
+    menu.addAction('设置…', ctl.open_settings)
     menu.addAction('打开配置文件', ctl.open_config)
     menu.addAction('重新加载配置', ctl.reload_config)
     menu.addSeparator()

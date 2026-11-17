@@ -165,6 +165,30 @@ class Config:
             return cls(copy.deepcopy(DEFAULTS)), f'配置文件有误，已使用默认配置：{e}'
 
 
+def save_sections(sections: dict, path: Path | None = None) -> Path | None:
+    """Replace whole top-level sections (types, prompt, hotkeys...) of the user's config file, keeping everything
+    else in it as it is. The previous file is kept as config.json.bak. Returns the backup's path."""
+    path = path or config_path()
+    try:
+        old = path.read_text(encoding='utf-8')
+        user = json.loads(old)
+        if not isinstance(user, dict):
+            raise ValueError
+    except (OSError, ValueError):
+        old, user = None, copy.deepcopy(DEFAULTS)
+    backup = None
+    if old is not None:
+        backup = path.with_name(path.name + '.bak')
+        backup.write_text(old, encoding='utf-8')
+    for k, v in sections.items():
+        user[k] = copy.deepcopy(v)
+    Config(_merge(DEFAULTS, user))                       # raises ValueError before anything is overwritten
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(json.dumps(user, ensure_ascii=False, indent=2), encoding='utf-8')
+    os.replace(tmp, path)
+    return backup
+
+
 def load_state() -> dict:
     try:
         return json.loads((data_dir() / 'state.json').read_text(encoding='utf-8'))

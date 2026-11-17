@@ -343,6 +343,23 @@ class Controller(QObject):
         """Switch to the annotation's window, scroll its quote into view and flash the highlight."""
         self.highlighter.jump(a)
 
+    def open_settings(self) -> None:
+        from .ui.settings import SettingsWindow
+        if getattr(self, '_settings', None) is None:
+            self._settings = SettingsWindow(self)
+        w = self._settings
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        QTimer.singleShot(150, lambda: self.platform.activate(int(w.winId())))
+
+    def suspend_hotkeys(self, on: bool) -> None:
+        """While the settings window records a key combination, X must deliver it there, not to our grabs."""
+        if on:
+            self.hotkeys.stop()
+        else:
+            self.hotkeys.start(self.cfg.hotkey_bindings())
+
     def open_config(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(cfgmod.config_path())))
 

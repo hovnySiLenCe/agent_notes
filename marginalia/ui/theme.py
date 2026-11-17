@@ -97,7 +97,25 @@ QMenu::item:selected { background: %(surface_hover)s; }
 QMenu::item:disabled { color: %(faint)s; }
 QMenu::separator { height: 1px; background: %(border)s; margin: 4px 8px; }
 QMenu::indicator { width: 14px; height: 14px; left: 4px; }
-QDialog, QMessageBox { background: %(bg_solid)s; }
+QDialog, QMessageBox, QWidget#settings { background: %(bg_solid)s; }
+QLineEdit, QSpinBox { background: %(surface)s; border: 1px solid %(border)s; border-radius: 7px; padding: 5px 8px;
+                      selection-background-color: %(accent)s; }
+QLineEdit:focus, QSpinBox:focus { border-color: %(accent)s; }
+QLineEdit:read-only { color: %(text)s; }
+QSpinBox::up-button, QSpinBox::down-button { width: 0; border: none; }
+QListWidget { background: %(surface)s; border: 1px solid %(border)s; border-radius: 9px; padding: 4px; outline: none; }
+QListWidget::item { padding: 6px 6px; border-radius: 6px; }
+QListWidget::item:hover { background: %(surface_hover)s; }
+QListWidget::item:selected { background: %(raised)s; color: %(text)s; }
+QTabWidget::pane { border: none; border-top: 1px solid %(border)s; }
+QTabBar::tab { background: transparent; color: %(muted)s; padding: 7px 14px; border: none;
+               border-bottom: 2px solid transparent; }
+QTabBar::tab:selected { color: %(text)s; border-bottom-color: %(accent)s; }
+QTabBar::tab:hover { color: %(text)s; }
+QPushButton#small { padding: 3px 9px; font-size: 12px; border-radius: 6px; color: %(muted)s; }
+QPushButton#small:hover { color: %(text)s; }
+QLabel#preview { background: %(surface)s; border: 1px solid %(border)s; border-radius: 8px; padding: 8px 10px;
+                 color: %(muted)s; }
 """
 
 
