@@ -32,6 +32,14 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     g.add_argument('--autostart', choices=('on', 'off'), help='登录桌面时自动启动')
     g.add_argument('--setup-firefox', action='store_true',
                    help='为 Firefox 打开无障碍接口（写入各配置目录的 user.js，重启 Firefox 后生效），用于精确定位与高亮')
+    g.add_argument('--plan', metavar='项目', nargs='?', const='',
+                   help='把计划发给面板的「计划」分栏（从标准输入或 --plan-file 读取；项目名默认取当前 git 仓库名）')
+    g.add_argument('--plan-hook', action='store_true', help=argparse.SUPPRESS)   # Claude Code's Stop hook
+    g.add_argument('--install-claude-hook', action='store_true',
+                   help='在 ~/.claude/settings.json 加入钩子：Claude Code 每次回复后自动发送回复末尾的「计划」')
+    g.add_argument('--uninstall-claude-hook', action='store_true', help='移除上面的钩子')
+    p.add_argument('--plan-file', metavar='文件', help='--plan 的内容来自这个文件（- 为标准输入）')
+    p.add_argument('--category', metavar='分类', help='--plan 只替换这一个分类（如 进行中）')
     p.add_argument('--detached', action='store_true', help=argparse.SUPPRESS)   # the background child
     return p.parse_args(argv)
 
@@ -140,7 +148,16 @@ def setup_firefox(home: Path | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse(sys.argv[1:] if argv is None else argv)
+    if args.plan_hook:                       # after every agent reply: no migration, no output, never an error
+        from .plan_cli import cmd_hook
+        return cmd_hook()
     _migrate()
+    if args.plan is not None:
+        from .plan_cli import cmd_plan
+        return cmd_plan(args.plan or None, args.plan_file, args.category)
+    if args.install_claude_hook or args.uninstall_claude_hook:
+        from .plan_cli import install_claude_hook
+        return install_claude_hook(args.install_claude_hook)
     from . import ipc
     if args.status:
         pid = ipc.request('ping')

@@ -39,6 +39,14 @@ QFrame#card:hover { background: %(surface_hover)s; border-color: %(border_strong
 QFrame#card[sent="true"] QLabel#quote { color: %(faint)s; }
 QFrame#card[sent="true"] QLabel#comment { color: %(muted)s; }
 QLabel#title { font-weight: 700; font-size: 14px; }
+QToolButton#tab { font-weight: 600; font-size: 14px; color: %(faint)s; padding: 2px 6px; border-radius: 6px; }
+QToolButton#tab:checked { color: %(text)s; background: transparent; }
+QToolButton#tab:hover { color: %(text)s; background: %(surface_hover)s; }
+QLabel#planSection { color: %(muted)s; font-size: 12px; font-weight: 600; padding: 8px 2px 1px 2px; }
+QFrame#planItem { background: %(surface)s; border: 1px solid %(border)s; border-radius: 8px; }
+QFrame#planItem:hover { background: %(surface_hover)s; border-color: %(border_strong)s; }
+QFrame#planItem[done="true"] QLabel#planText { color: %(faint)s; text-decoration: line-through; }
+QLabel#planText { color: %(text)s; }
 QLabel#countPill { color: %(accent)s; background: rgba(91, 141, 239, 36); border-radius: 8px; padding: 0 7px;
                    font-size: 11px; font-weight: 600; }
 QLabel#muted { color: %(muted)s; }

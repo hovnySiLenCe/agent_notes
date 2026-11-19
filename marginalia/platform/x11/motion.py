@@ -78,3 +78,49 @@ def shift(prev: np.ndarray, cur: np.ndarray, guess: int = 0) -> int | None:
     tied = shifts[minima & (ssd <= floor * TIE + 1.0)]
     s = int(min(tied, key=lambda c: abs(c + guess)))           # equally good: continue the current motion
     return -s           # prev[y + s] == cur[y]: the content moved by -s
+
+
+class Follower:
+    """Follows the content at a screen point of a window while it scrolls (the selection bubble stays next to the
+    selected text). Strips are taken left of the point: the bubble itself sits to its right."""
+    STRIP_W = 32
+
+    def __init__(self, xid: int, x: int, y: int):
+        from . import windows
+        self.xid, self.x, self.y = xid, x, y          # physical screen pixels
+        self.dy = 0                                   # content motion so far
+        self._prev = None
+        self._guess = 0
+        rect = windows.client_rect(xid)
+        self._strip = None
+        if rect is None:
+            return
+        wx, wy, ww, wh = rect
+        self.rect = rect
+        xs = sorted({min(max(0, x - wx - d - self.STRIP_W), ww - self.STRIP_W) for d in (24, 140, 260)})
+        top = max(0, y - wy - 420)
+        h = min(wh - top, 840)
+        if ww >= self.STRIP_W and h >= 64:
+            self._strip = (tuple(xs), top, self.STRIP_W, h)
+            self._prev = grab_strip(xid, *self._strip)
+
+    def step(self) -> int | None:
+        """Total content motion (px) since the start, or None when it can't be followed any more."""
+        if self._strip is None or self._prev is None:
+            return None
+        cur = grab_strip(self.xid, *self._strip)
+        if cur is None:
+            return None
+        d = shift(self._prev, cur, self._guess)
+        self._prev = cur
+        if d:
+            self.dy += d
+            self._guess = d
+        else:
+            self._guess = 0
+        return self.dy
+
+    def inside(self) -> bool:
+        """The followed point is still inside the window."""
+        wx, wy, ww, wh = self.rect
+        return wy <= self.y + self.dy < wy + wh

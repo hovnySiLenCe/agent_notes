@@ -104,6 +104,23 @@ class X11Platform(Platform):
         return {'ok': True, 'input': focused and focused['name'], 'input_path': focused and focused['path'],
                 'ms': steps}
 
+    def windows_of(self, pids: set[int]) -> list[WindowInfo]:
+        out = []
+        for xid in windows.client_list():
+            w = windows.info(xid)
+            if w is not None and w.pid in pids:
+                out.append(w)
+        return out
+
+    def follower(self, xid: int, x: int, y: int):
+        """Something whose step() returns how far the content at (x, y) has scrolled (or None); None if the
+        pixels can't be watched (no compositor: the window's image would include our own windows)."""
+        if not windows.compositing():
+            return None
+        from .motion import Follower
+        f = Follower(xid, x, y)
+        return f if f.step() is not None else None
+
     def input_path(self, target: WindowInfo, anchor_path: list | None) -> list | None:
         from ..atspi.inputs import input_path
         return input_path(target.pid, target.title, anchor_path, target.xid)

@@ -98,6 +98,11 @@ class SelectionBubble(QWidget):
         self.raise_()
         self._timer.start(self.timeout_ms)
 
+    def keep_alive(self) -> None:
+        """It moved along with its text: restart the time it stays up."""
+        if not self.underMouse():
+            self._timer.start(self.timeout_ms)
+
     def contains_pointer(self) -> bool:
         return self.isVisible() and self.frameGeometry().contains(QCursor.pos())
 

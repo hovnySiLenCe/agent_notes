@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import faulthandler
+import json
 import logging
 import os
 import signal
 import sys
 import time
 
-from PySide6.QtCore import QMimeData, QObject, QTimer, QUrl, QFileSystemWatcher
+from PySide6.QtCore import QMimeData, QObject, QPoint, QTimer, QUrl, QFileSystemWatcher
 from PySide6.QtGui import QClipboard, QCursor, QDesktopServices, QGuiApplication
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
@@ -17,7 +18,10 @@ from . import config as cfgmod
 from . import ipc, qtfix
 from .core.composer import compose
 from .core.models import INPUT_NONE, SENT, Annotation
+from .core.plans import PlanStore
+from .core.plans import parse as parse_plan
 from .core.store import Store
+from .plan_server import PlanServer
 from .highlight import Highlighter
 from .ui.bubble import SelectionBubble
 from .platform.base import WindowInfo, get_platform
@@ -50,6 +54,9 @@ class Controller(QObject):
         self.state = cfgmod.load_state()
         self.cfg, cfg_error = cfgmod.Config.load()
         self.store = Store(cfgmod.data_dir() / 'notes.db')
+        self.plans = PlanStore(cfgmod.data_dir() / 'notes.db')
+        self.plan_server = PlanServer(self.receive_plan, self.read_plan)
+        self.plan_server.listen(self._plan_port())
         self.toast = Toast()
         self.panel = FloatingPanel(self)
         self.popup = AnnotatePopup(self.platform.activate)
@@ -76,6 +83,9 @@ class Controller(QObject):
             self.selwatch.selected.connect(self._on_text_selected)
             self.selwatch.pressed.connect(self._on_pointer_pressed)
             self.selwatch.scrolled.connect(self.highlighter.scrolled)
+            self.selwatch.scrolled.connect(self._on_scrolled)
+        self._follow: dict | None = None               # the bubble following its selection while it scrolls
+        self._follow_timer = QTimer(self, interval=16, timeout=self._follow_tick)
         self._sync_bubble()
 
         self.worker.submit(self.platform.warm_up)     # the first capture must not pay AT-SPI's cold start
@@ -158,7 +168,43 @@ class Controller(QObject):
         win = self.platform.active_window()
         if win is None or win.pid == os.getpid() or not self.platform.selection_belongs_to(win):
             return
-        self.bubble.show_at()
+        pos = QCursor.pos()
+        self.bubble.show_at(pos)
+        dpr = self._dpr()
+        f = self.platform.follower(win.xid, round(pos.x() * dpr), round(pos.y() * dpr))
+        self._follow = {'f': f, 'base': self.bubble.pos(), 'until': 0.0} if f is not None else None
+
+    @staticmethod
+    def _dpr() -> float:
+        scr = QGuiApplication.primaryScreen()
+        return scr.devicePixelRatio() if scr else 1.0
+
+    def _on_scrolled(self) -> None:
+        """The wheel turned: keep the selection bubble next to its text while the content moves."""
+        if self._follow is None or not self.bubble.isVisible():
+            return
+        self._follow['until'] = time.monotonic() + 0.6
+        if not self._follow_timer.isActive():
+            self._follow_timer.start()
+
+    def _follow_tick(self) -> None:
+        fol = self._follow
+        if fol is None or not self.bubble.isVisible():
+            self._follow = None
+            self._follow_timer.stop()
+            return
+        dy = fol['f'].step()
+        if dy is None or not fol['f'].inside():         # lost it, or the selection scrolled out of the window
+            self.bubble.hide()
+            self._follow = None
+            self._follow_timer.stop()
+            return
+        target = fol['base'] + QPoint(0, round(dy / self._dpr()))
+        if target != self.bubble.pos():
+            self.bubble.move(target)
+            self.bubble.keep_alive()
+        if time.monotonic() > fol['until']:
+            self._follow_timer.stop()
 
     def _on_pointer_pressed(self) -> None:
         if self.bubble.isVisible() and not self.bubble.contains_pointer():
@@ -236,10 +282,13 @@ class Controller(QObject):
         name = self.cfg.type_map[type_id].name if type_id in self.cfg.type_map else type_id
         self.panel.reveal()
         self.toast.show_message(f'已添加批注 · {name}', 'ok', 1400, near=self.panel)
-        self.worker.submit(self.platform.activate, ctx['win'].xid, urgent=True)   # focus back where the user was
         ctx['ann_id'] = a.id
+        if ctx['win'] is None:                         # (a plan item whose window is unknown)
+            return
+        if ctx.get('return_focus', True):              # (not for plan items: the user was in the panel)
+            self.worker.submit(self.platform.activate, ctx['win'].xid, urgent=True)
         self._prepare_input(ctx['win'], a.anchor.get('path'))
-        if a.anchor.get('method') != 'atspi' and a.quote.strip() and not ctx.get('pending'):
+        if a.anchor.get('method') not in ('atspi', 'plan') and a.quote.strip() and not ctx.get('pending'):
             self._late_anchor(a.id, ctx['win'], a.quote)
 
     def _prepare_input(self, win: WindowInfo, anchor_path: list | None) -> None:
@@ -282,8 +331,73 @@ class Controller(QObject):
 
     def _on_popup_cancelled(self) -> None:
         ctx, self._capture_ctx = self._capture_ctx, None
-        if ctx is not None:
+        if ctx is not None and ctx['win'] is not None and ctx.get('return_focus', True):
             self.worker.submit(self.platform.activate, ctx['win'].xid, urgent=True)
+
+    # ---- agents' plans ----------------------------------------------------------------------------------------
+    def _plan_port(self, cfg=None) -> int:
+        try:
+            return max(0, int(((cfg or self.cfg).data.get('plan') or {}).get('port') or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def receive_plan(self, payload: dict) -> dict:
+        """A plan from an agent (hook / command line / HTTP): {project, text, category?, pids?, cwd?, agent?}."""
+        project = ' '.join(str(payload.get('project') or 'default').split())[:80] or 'default'
+        sections = parse_plan(str(payload.get('text') or ''))
+        if not any(items for _, items in sections):
+            return {'ok': False, 'error': '没有解析出计划条目'}
+        prev = self.plans.project(project)
+        source = self._plan_source(payload, project, (prev or {}).get('source') or {})
+        res = self.plans.update(project, sections, source, payload.get('category') or None)
+        log.info('plan %r: +%d -%d =%d (window %s)', project, res['added'], res['removed'], res['kept'],
+                 source.get('xid'))
+        self.panel.plan_updated(project, res)
+        return {'ok': True, **res}
+
+    def read_plan(self, project: str) -> dict | None:
+        if self.plans.project(project) is None:
+            return None
+        return {'project': project, 'sections': [{'category': c, 'items': [it['text'] for it in items]}
+                                                 for c, items in self.plans.sections(project)]}
+
+    def _plan_source(self, payload: dict, project: str, prev: dict) -> dict:
+        """The window the agent runs in: one owned by the sender or a parent of it (its terminal / VS Code). Several
+        windows can share that process: the active one, the one used before, or one whose title names the project."""
+        pids = {p for p in payload.get('pids') or [] if isinstance(p, int)}
+        wins = self.platform.windows_of(pids) if pids else []
+        win = None
+        if wins:
+            active = self.platform.active_window()
+            by_xid = {w.xid: w for w in wins}
+            win = (by_xid.get(active.xid) if active else None) or by_xid.get(prev.get('xid')) or \
+                next((w for w in wins if project.lower() in (w.title or '').lower()), None) or wins[0]
+        elif prev.get('xid') and self.platform.window_exists(prev['xid']):
+            return dict(prev, cwd=payload.get('cwd') or prev.get('cwd', ''))
+        if win is None:
+            return {'cwd': payload.get('cwd') or prev.get('cwd', ''), 'agent': payload.get('agent', '')}
+        return {'xid': win.xid, 'pid': win.pid, 'wm_class': win.wm_class, 'title': win.title,
+                'cwd': payload.get('cwd') or '', 'agent': payload.get('agent', '')}
+
+    def annotate_plan_item(self, item_id: str, type_id: str | None) -> None:
+        """Annotate a plan item like selected text: the popup (or straight away for one-click types)."""
+        item = self.plans.item(item_id)
+        if item is None or self.popup.isVisible():
+            return
+        proj = self.plans.project(item['project']) or {}
+        src = proj.get('source') or {}
+        win = None
+        if src.get('xid') and self.platform.window_exists(src['xid']):
+            win = WindowInfo(xid=src['xid'], pid=src.get('pid'), wm_instance=src.get('wm_class', ''),
+                             wm_class=src.get('wm_class', ''), title=src.get('title', ''))
+        source = {'xid': src.get('xid'), 'pid': src.get('pid'), 'wm_class': src.get('wm_class', ''),
+                  'title': src.get('title', ''), 'app': '计划', 'url': f'plan:{item["project"]}',
+                  'project': item['project']}
+        anchor = {'method': 'plan', 'project': item['project'], 'item': item['id'], 'category': item['category']}
+        ctx = self._capture_ctx = {'win': win, 'quote': item['text'], 'anchor': anchor, 'source': source,
+                                   'pending': False, 'return_focus': False}
+        t = self.cfg.type_map.get(type_id) if type_id else None
+        self._open_capture(ctx, type_id, t)
 
     # ---- compose & fill -----------------------------------------------------------------------------------------
     def compose(self, items: list[Annotation], plain: bool = False) -> str:
@@ -405,7 +519,10 @@ class Controller(QObject):
             return
         if cfg.data == self.cfg.data:
             return
+        port_changed = self._plan_port(cfg) != self._plan_port()
         self.cfg = cfg
+        if port_changed:
+            self.plan_server.listen(self._plan_port())
         self.hotkeys.start(cfg.hotkey_bindings())
         self.panel.config_changed()
         self.popup.setWindowOpacity(self._popup_opacity())
@@ -429,6 +546,7 @@ class Controller(QObject):
         if self.selwatch is not None:
             self.selwatch.stop()
         self.hotkeys.stop()
+        self.plan_server.close()
         self.worker.shutdown()
         self.app.quit()
 
@@ -468,7 +586,12 @@ class CommandServer(QObject):
         conn.write(f'ok {os.getpid()}\n'.encode())
         conn.flush()
         conn.disconnectFromServer()
-        if cmd == 'show':
+        if cmd.startswith('plan '):
+            try:
+                self.ctl.receive_plan(json.loads(cmd[5:]))
+            except Exception:                                   # noqa: BLE001 - a bad message must not hurt the app
+                log.exception('bad plan message')
+        elif cmd == 'show':
             self.ctl.show_from_second_instance()
         elif cmd == 'quit':
             log.info('quit requested from the command line')

@@ -59,6 +59,15 @@ class Platform(ABC):
         at_cursor: paste where the cursor is in the (already active) window instead: no input lookup, no ctrl+End.
         input_hint: where the input box was last time in this window (the result's 'input_path')."""
 
+    def windows_of(self, pids: set[int]) -> list[WindowInfo]:
+        """Top-level windows owned by any of these processes."""
+        return []
+
+    def follower(self, xid: int, x: int, y: int):
+        """Follows the content at screen point (x, y) of window `xid` as it scrolls: step() -> motion so far in px
+        (None: lost), inside() -> the point is still in the window. None when unsupported."""
+        return None
+
     def input_path(self, target: WindowInfo, anchor_path: list | None) -> list | None:
         """worker: find the chat input box ahead of time; returns a hint for inject (None if not found)."""
         return None

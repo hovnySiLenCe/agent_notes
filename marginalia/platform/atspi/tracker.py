@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from ..x11 import motion, windows
 from .geometry import EMPTY, Rect, box_scale, intersect, scaled, scroll_pane, text_rects, visible_area, vte_rects
 from .locate import Segment, collect, fast_locate, frames_for, locate, resolve, scroll_into_view, single_node
-from .tree import OBJ, Atspi, T
+from .tree import OBJ, Atspi, S, T, walk
+from ...core.anchor import find_quote, normalize
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ RESYNC_S = 0.7           # s without pixel motion after which AT-SPI positions a
                          # refresh about every 0.5 s)
 STRIP_W = 32             # px wide strips of the scroll pane watched for motion: where the text's lines start, …
 STRIPS = (0.5, 0.8)      # … and at these fractions of the pane's width
+PARTIAL_MIN = 8          # characters (whitespace aside) of a quote that must show at the screen's edge to mark it
 
 
 @dataclass
@@ -97,6 +99,9 @@ class _Entry:
     partial: list[Segment] | None = None   # fast path's first segment of a multi-node capture
     misses: int = 0                  # searches in a row that didn't find it
     retry_at: float = 0.0
+    term: object = None              # terminals: the VTE node whose screen text is searched every tick
+    seen: str | None = None          # … its text when the quote was last looked for there
+    clipped: bool = False            # … only part of the quote is on screen (cut at the top or bottom edge)
 
 
 @dataclass
@@ -132,6 +137,55 @@ def _probe(s: _Seg, xid: int) -> tuple | None:
     a = T.get_character_extents(s.seg.node, ends[0], Atspi.CoordType.SCREEN)
     b = T.get_character_extents(s.seg.node, ends[1], Atspi.CoordType.SCREEN)
     return ('g', a.x, a.y, b.x, b.y)
+
+
+def on_screen(text: str, quote: str, prefix: str = '', suffix: str = '', near: int | None = None
+              ) -> tuple[int, int, bool] | None:
+    """Where `quote` is in a terminal's screen text: (start, end, clipped). When the screen's top or bottom edge cuts
+    through it, the part that shows (at least PARTIAL_MIN characters), with clipped=True."""
+    hit = find_quote(text, quote, prefix, suffix, near)
+    if hit:
+        return hit[0], hit[1], False
+    nt, idx = normalize(text, drop_space=True)
+    nq = normalize(quote, drop_space=True)[0].strip()
+    need = min(len(nq), PARTIAL_MIN)
+    if not need or len(nt) < need:
+        return None
+    best = None
+    head = nt[:need]                                  # the quote's tail at the top of the screen
+    p = nq.find(head)
+    while p >= 0:
+        if nt.startswith(nq[p:]) and (best is None or len(nq) - p > best[1] - best[0]):
+            best = (0, len(nq) - p)
+        p = nq.find(head, p + 1)
+    tail = nt[-need:]                                 # the quote's head at the bottom
+    p = nq.find(tail)
+    while p >= 0:
+        k = p + need
+        if nt.endswith(nq[:k]) and (best is None or k > best[1] - best[0]):
+            best = (len(nt) - k, len(nt))
+        p = nq.find(tail, p + 1)
+    if best is None:
+        return None
+    return idx[best[0]], idx[best[1] - 1] + 1, True
+
+
+def _find_terminal(frame, path) -> object | None:
+    """The VTE node at the captured path, else the first showing terminal in the window."""
+    from .locate import node_at
+    node = node_at(frame, path or [])[0] if frame is not None else None
+    try:
+        if node is not None and node.get_role_name() == 'terminal':
+            return node
+    except Exception:
+        pass
+    for n, _, _ in walk(frame, time.monotonic() + 0.05, max_nodes=400) if frame is not None else ():
+        try:
+            if n.get_role_name() == 'terminal' and n.get_state_set().contains(S.SHOWING):
+                return n
+        except Exception:
+            continue
+    return None
 
 
 def _refresh(s: _Seg, xid: int, offset: int = 0, origin: tuple = (0, 0)) -> bool:
@@ -277,6 +331,7 @@ class Tracker:
         self._panes: dict[int, tuple] = {}            # xid -> (scroll pane, text column) seen this tick
         wanted: dict[int, list] = {}
         deferred = False                              # due for finding, but this tick's time ran out
+        screens: dict[int, str] = {}                  # terminal node -> its screen text, read once per tick
         for req in sorted(reqs, key=lambda r: r['id'] not in focus):       # focused ones get searched first
             xid = req['xid']
             if req['id'] not in focus and xid != self.context_xid:
@@ -289,6 +344,9 @@ class Tracker:
                     self._follow_pixels(xid, wins[xid]['rect'], now)
             if not wins[xid]['shown']:
                 items[req['id']] = {'state': 'hidden', 'rects': []}
+                continue
+            if (req.get('anchor') or {}).get('role') == 'terminal':
+                self._terminal(req, items, screens, now)
                 continue
             try:
                 e = self._entry(req, now)
@@ -322,6 +380,53 @@ class Tracker:
         self._motion = {x: m for x, m in self._motion.items() if x in wins}
         return {'context': self.context_xid, 'items': items, 'windows': wins,
                 'searching': searching or deferred or (bool(wanted) and moving)}
+
+    def _terminal(self, req: dict, items: dict, screens: dict, now: float) -> None:
+        """A terminal shows a screenful of text and the quote moves through it as output arrives or the user
+        scrolls (the captured offsets then point at other text). Its screen text is cheap to read, so the quote
+        is looked for in it on every tick instead of every few seconds like other text."""
+        key, xid = (req['xid'], req['quote']), req['xid']
+        e = self._entries.get(req['id'])
+        if e is None or e.key != key:
+            e = self._entries[req['id']] = _Entry(key)
+        anchor = req.get('anchor') or {}
+        if e.term is None:
+            if now < e.retry_at:
+                items[req['id']] = {'state': 'missing', 'rects': []}
+                return
+            e.term = _find_terminal(self._frame(req), anchor.get('path'))
+            if e.term is None:
+                e.misses += 1
+                e.retry_at = now + min(RETRY_MAX, RETRY_AFTER * 2 ** (e.misses - 1))
+                self._frames.pop(xid, None)
+                items[req['id']] = {'state': 'missing', 'rects': []}
+                return
+        try:
+            text = screens.get(id(e.term))
+            if text is None:
+                text = screens[id(e.term)] = T.get_text(e.term, 0, T.get_character_count(e.term))
+            seg = e.segs[0] if e.segs else None
+            if seg is None or e.clipped or text[seg.seg.start:seg.seg.end] != seg.seg.text:
+                if seg is None and text == e.seen:     # nothing changed on screen since it wasn't there
+                    items[req['id']] = {'state': 'offscreen', 'rects': []}
+                    return
+                e.seen = text
+                near = seg.seg.start if seg else anchor.get('start')
+                hit = on_screen(text, req['quote'], anchor.get('prefix', ''), anchor.get('suffix', ''), near)
+                if hit is None:
+                    e.segs, e.clipped = None, False
+                    items[req['id']] = {'state': 'offscreen', 'rects': []}
+                    return
+                s, end, e.clipped = hit
+                if seg is None or (s, end) != (seg.seg.start, seg.seg.end):
+                    e.segs = [_Seg(Segment(e.term, s, end, text[s:end], True))]
+            seg = e.segs[0]
+            _refresh(seg, xid)
+        except Exception:                             # the terminal (tab) went away: find it again
+            e.term, e.segs = None, None
+            return
+        rects = seg.rects()
+        items[req['id']] = {'state': 'ok' if rects else 'offscreen', 'rects': rects}
 
     def _measure(self, req: dict, e: _Entry, items: dict, mot: _Motion | None, win_rect) -> None:
         offset, pane = (mot.offset, mot.pane) if mot else (0, None)

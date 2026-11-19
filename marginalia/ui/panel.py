@@ -8,10 +8,11 @@ from PySide6.QtCore import QEvent, QMimeData, QPoint, QPropertyAnimation, QRect,
 from PySide6.QtGui import QColor, QCursor, QDrag, QGuiApplication, QIcon, QPainter
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
                                QHBoxLayout, QLabel, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
-                               QSizeGrip, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
+                               QSizeGrip, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.models import PENDING, RESOLVED, SENT, Annotation, AnnoType
 from .icons import icon, pixmap
+from .plan_view import PlanView
 from .theme import C, quote_block, rgba, type_tag_style
 
 if TYPE_CHECKING:
@@ -68,7 +69,9 @@ class Card(QFrame):
         self.check.toggled.connect(lambda on: panel.ctl.store.update(ann.id, checked=on))
         name = QLabel(atype.name)
         name.setStyleSheet(type_tag_style(atype.color))
-        src = QLabel(_elide(app_label(ann.source), 18), objectName='faint')
+        plan = ann.anchor.get('method') == 'plan'
+        src = QLabel(_elide(f'计划 · {ann.anchor.get("project", "")}' if plan else app_label(ann.source), 18),
+                     objectName='faint')
         src.setToolTip(source_label(ann.source, 200))
         src.setMinimumWidth(0)                        # gives way first when the row is narrow …
         src.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # … the action buttons never do
@@ -315,13 +318,19 @@ class FloatingPanel(QWidget):
         logo = QLabel()
         logo.setPixmap(pixmap('note', C['accent'], 16))
         self._title = QLabel('批注', objectName='title')
+        self._title.hide()
+        self._tab_notes = self._tab('批注', '批注列表')
+        self._tab_plan = self._tab('计划', 'Agent 汇报的计划（进行中 / 等你决定 / 以后）')
+        self._tab_notes.clicked.connect(lambda: self.show_tab('notes'))
+        self._tab_plan.clicked.connect(lambda: self.show_tab('plan'))
         self._count = QLabel('', objectName='countPill')
         self._count.hide()
         hl.addWidget(logo)
         hl.addSpacing(2)
-        hl.addWidget(self._title)
-        hl.addSpacing(4)
+        hl.addWidget(self._tab_notes)
         hl.addWidget(self._count)
+        hl.addSpacing(2)
+        hl.addWidget(self._tab_plan)
         hl.addStretch(1)
         self._menu_btn = self._tool('more', '菜单')
         self._menu_btn.setPopupMode(QToolButton.InstantPopup)
@@ -355,9 +364,9 @@ class FloatingPanel(QWidget):
             hl.addWidget(b)
         lay.addWidget(self._header)
 
-        # body
-        self._body = QWidget()
-        bl = QVBoxLayout(self._body)
+        # body: the annotation list, or the agents' plans
+        self._notes = QWidget()
+        bl = QVBoxLayout(self._notes)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(6)
         fl = QHBoxLayout()
@@ -415,7 +424,14 @@ class FloatingPanel(QWidget):
         foot.addWidget(self._fill_btn)
         foot.addWidget(QSizeGrip(self), 0, Qt.AlignBottom | Qt.AlignRight)
         bl.addLayout(foot)
+        self._plan = PlanView(ctl)
+        self._plan.foot.addWidget(QSizeGrip(self), 0, Qt.AlignBottom | Qt.AlignRight)
+        self._body = QStackedWidget()
+        self._body.addWidget(self._notes)
+        self._body.addWidget(self._plan)
         lay.addWidget(self._body, 1)
+        self._plan_unseen = False
+        self.show_tab(ctl.state.get('panel_tab', 'notes'), save=False)
 
         # Translucent while idle so it doesn't hide what's behind it; solid while hovered/focused/just updated.
         self._fade = QPropertyAnimation(self, b'windowOpacity', self)
@@ -433,6 +449,46 @@ class FloatingPanel(QWidget):
         b.setToolTip(tip)
         b.setCursor(Qt.ArrowCursor)
         return b
+
+    def _tab(self, text: str, tip: str) -> QToolButton:
+        b = QToolButton(objectName='tab')
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setCheckable(True)
+        b.setFocusPolicy(Qt.NoFocus)
+        b.setCursor(Qt.PointingHandCursor)
+        return b
+
+    def show_tab(self, name: str, save: bool = True) -> None:
+        plan = name == 'plan'
+        self._tab_notes.setChecked(not plan)
+        self._tab_plan.setChecked(plan)
+        self._body.setCurrentWidget(self._plan if plan else self._notes)
+        if plan:
+            self._plan_unseen = False
+            self._plan.refresh()
+        else:
+            self._plan.hide_transient()
+        self._tab_plan.setText('计划 •' if self._plan_unseen else '计划')
+        if save:
+            self.ctl.state['panel_tab'] = name
+            self.ctl.save_state()
+        if self._collapsed:
+            self.set_collapsed(False)
+
+    def current_tab(self) -> str:
+        return 'plan' if self._body.currentWidget() is self._plan else 'notes'
+
+    def plan_updated(self, project: str, res: dict) -> None:
+        """An agent sent a plan: show it if the plan tab is open, else mark the tab."""
+        if self.current_tab() == 'plan':
+            self._plan.refresh(select=project)
+        else:
+            self._plan_unseen = True
+            self._plan._project = project
+            self._tab_plan.setText('计划 •')
+        self._tab_plan.setToolTip(f'{project} 的计划已更新：新增 {res["added"]}，移除 {res["removed"]}')
+        self.reveal()
 
     def _segment(self, text: str, tip: str) -> QToolButton:
         b = QToolButton(objectName='segment')
@@ -502,6 +558,8 @@ class FloatingPanel(QWidget):
         here = f"；{hk['fill_here']}：同样的内容输入在当前窗口的光标处" if hk.get('fill_here') else ''
         self._fill_btn.setToolTip('填入完整 prompt（提示语 + 每条批注的类型说明）' + here)
         self._update_preview(items)
+        if self.current_tab() == 'plan':
+            self._plan.refresh()                       # (its annotation tags and fill count)
 
     # ---- original-text highlights ---------------------------------------------------------------------------
     def _highlighter(self):
@@ -660,6 +718,7 @@ class FloatingPanel(QWidget):
             return
         if on:
             self._expanded_geo = self.geometry()
+            self._plan.hide_transient()
             self._body.hide()
             self.setMinimumSize(0, 0)
             self._fit_bar()

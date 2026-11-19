@@ -14,6 +14,7 @@ _preload_xcb_cursor()
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from marginalia import config as cfgmod  # noqa: E402
+from marginalia.core.plans import PlanStore  # noqa: E402
 from marginalia.core.store import Store  # noqa: E402
 from marginalia.ui.panel import FloatingPanel  # noqa: E402
 
@@ -29,6 +30,7 @@ class PanelOpacityTest(unittest.TestCase):
         self.ctl = SimpleNamespace(cfg=cfgmod.Config(json.loads(json.dumps(cfgmod.DEFAULTS))),
                                    state={'panel': {'x': 400, 'y': 300, 'w': 380, 'h': 560}},
                                    store=Store(Path(self.tmp.name) / 'n.db'), compose=lambda items: '',
+                                   plans=PlanStore(Path(self.tmp.name) / "n.db"), plan_server=None,
                                    open_config=noop, open_settings=noop, reload_config=noop, quit=noop, fill=noop, save_state=noop)
         self.panel = FloatingPanel(self.ctl)
 

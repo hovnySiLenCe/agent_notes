@@ -95,6 +95,7 @@ DEFAULTS = {
                      'all=包括已发送的 / hover=只在鼠标悬停卡片或跳转时高亮',
         'bubble': 'enabled=用鼠标选中文字后，在指针旁弹出一排批注类型按钮（面板 ⋯ 菜单里也可关闭）；'
                   'types=显示前几个类型；timeout_ms=不理会时多久后自动消失',
+        'plan': 'port=本地 HTTP 端口（只监听 127.0.0.1），Agent 用 POST /plan/<项目> 发送计划；0 表示关闭',
         'fill': 'mode: fill=自动填入输入框 / copy=只复制到剪贴板；target: source=批注来源窗口 / active=按快捷键时的当前窗口；'
                 'auto_send: 填入后自动按回车发送；mark_sent: 填入后把批注标记为已发送',
     },
@@ -109,6 +110,7 @@ DEFAULTS = {
     'popup': {'opacity': 0.97},
     'highlight': {'enabled': True, 'show': 'pending'},
     'bubble': {'enabled': True, 'types': 4, 'timeout_ms': 3500},
+    'plan': {'port': 47321},
 }
 
 
