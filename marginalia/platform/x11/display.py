@@ -16,7 +16,14 @@ def get() -> display.Display:
 
 
 def atom(name: str) -> int:
-    return get().intern_atom(name)
+    """Interned atom, cached (atoms never change while the server runs; interning is a round trip)."""
+    cache = getattr(_local, 'atoms', None)
+    if cache is None:
+        cache = _local.atoms = {}
+    a = cache.get(name)
+    if a is None:
+        a = cache[name] = get().intern_atom(name)
+    return a
 
 
 def root():

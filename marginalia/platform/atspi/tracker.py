@@ -39,8 +39,11 @@ MOVING_SLICE = 0.003     # (enough to re-check a path, not to walk)
 FRAME_TTL = 10.0         # s a window's frame lookup is reused (a cold lookup can take ~50 ms: never while scrolling)
 RESYNC_S = 0.7           # s without pixel motion after which AT-SPI positions are taken as exact again (they
                          # refresh about every 0.5 s)
-STRIP_W = 32             # px wide strips of the scroll pane watched for motion: where the text's lines start, …
+STRIP_W = 12             # px wide strips of the scroll pane watched for motion: where the text's lines start, …
 STRIPS = (0.5, 0.8)      # … and at these fractions of the pane's width
+STRIP_H = 1200           # px of the pane's height watched at most (around its middle). Reading a window's pixels
+                         # back costs time in proportion to their number: three full-height 32 px strips of a tall
+                         # pane on a HiDPI screen took ~33 ms a frame, halving the frame rate while scrolling.
 PARTIAL_MIN = 8          # characters (whitespace aside) of a quote that must show at the screen's edge to mark it
 
 
@@ -470,6 +473,8 @@ class Tracker:
             return
         wx, wy, ww, wh = win_rect
         px, py, pw, ph = mot.pane
+        if ph > STRIP_H:
+            py, ph = py + (ph - STRIP_H) // 2, STRIP_H
         xs = sorted({min(max(x, px), px + pw - STRIP_W) - wx for x in
                      [mot.strip_x] + [px + int(pw * f) for f in STRIPS]})
         strip = (tuple(xs), py - wy, STRIP_W, ph)

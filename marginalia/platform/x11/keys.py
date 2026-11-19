@@ -33,18 +33,44 @@ def send(combo: str) -> None:
     d.sync()
 
 
-def wait_keys_released(timeout: float = 2.0) -> bool:
-    """Wait until the user lets go of the hotkey that triggered us, all of it.
+def _held(d) -> set[int]:
+    return {i * 8 + b for i, byte in enumerate(d.query_keymap()) for b in range(8) if byte >> b & 1}
 
-    Modifiers still held would turn ctrl+v into ctrl+shift+alt+v. A held Return (Shift+Alt+Return fills) is
-    worse: once the modifiers are up, its auto-repeat lands in the agent's input box as an extra newline (or, with
-    Shift still down, Shift+Return = newline in most chat inputs).
+
+def _clearable(d) -> set[int]:
+    """Keycodes of Shift, Ctrl and Alt: modifiers we may release on the user's behalf. (Not Super: releasing it
+    could look like a Super tap to the desktop, which opens its overview.)"""
+    mm = d.get_modifier_mapping()
+    return {kc for i in (X.ShiftMapIndex, X.ControlMapIndex, X.Mod1MapIndex) for kc in mm[i] if kc}
+
+
+def wait_keys_released(timeout: float = 2.0) -> bool:
+    """Wait until the user lets go of the hotkey that triggered us.
+
+    The hotkey's own key (Return …) has to come up: until then our grab gets every key event, our paste included,
+    and its auto-repeat would land in the agent's input box as newlines. Modifiers still held would turn ctrl+v
+    into ctrl+shift+alt+v, but people let go of them a good 200 ms later than of the key, so instead of waiting
+    we release them ourselves (XTest). The server treats them as up from then on and drops the physical release
+    that follows. Super, or any other key still down, is waited for.
     """
     d = xd.get()
+    mods = _clearable(d)
+    alt = set(d.get_modifier_mapping()[X.Mod1MapIndex])
     end = time.monotonic() + timeout
     while True:
-        if not any(d.query_keymap()):
+        held = _held(d)
+        if not held:
             return True
+        if held <= mods:
+            ctrl = _keycode('Control_L')
+            if held & alt:                              # a lone Alt release opens the app's menu bar: tap Ctrl first
+                xtest.fake_input(d, X.KeyPress, ctrl)
+                xtest.fake_input(d, X.KeyRelease, ctrl)
+            for c in sorted(held):
+                xtest.fake_input(d, X.KeyRelease, c)
+            d.sync()
+            if not _held(d):
+                return True
         if time.monotonic() > end:
             return False
-        time.sleep(0.02)
+        time.sleep(0.005)

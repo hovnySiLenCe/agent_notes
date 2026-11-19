@@ -3,6 +3,10 @@
 Implements just what Marginalia relies on: _NET_ACTIVE_WINDOW (read + activation requests), _NET_CLIENT_LIST,
 _NET_CLIENT_LIST_STACKING, _NET_CURRENT_DESKTOP. No decorations, no reparenting.
 
+MINIWM_COMPOSITE=1: also act as a (non-painting) compositing manager: every window gets its own offscreen buffer
+and _NET_WM_CM_S0 is owned, as on a desktop with a compositor. Marginalia then follows scrolling by the windows'
+pixels. Nothing reaches the screen itself in this mode (it is invisible anyway).
+
 Usage:  python -m tests.e2e.miniwm        (DISPLAY must point at the sandbox server)
 """
 from __future__ import annotations
@@ -39,6 +43,10 @@ class WM:
                              [A(n) for n in ('_NET_ACTIVE_WINDOW', '_NET_CLIENT_LIST', '_NET_CLIENT_LIST_STACKING',
                                              '_NET_CURRENT_DESKTOP', '_NET_WM_PID')])
         root.change_property(A('_NET_CURRENT_DESKTOP'), Xatom.CARDINAL, 32, [0])
+        if os.environ.get('MINIWM_COMPOSITE'):
+            from Xlib.ext import composite
+            root.composite_redirect_subwindows(composite.RedirectManual)
+            check.set_selection_owner(A(f'_NET_WM_CM_S{d.get_default_screen()}'), X.CurrentTime)
         self.publish()
 
     def publish(self) -> None:

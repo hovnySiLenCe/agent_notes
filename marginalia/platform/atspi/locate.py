@@ -11,10 +11,10 @@ import time
 from dataclasses import dataclass
 from typing import Iterator
 
-from ...core.anchor import find_quote, normalize, parts
+from ...core.anchor import compact, find_quote, normalize, parts
 from ..x11 import windows
 from .geometry import node_rect
-from .tree import OBJ, S, T, find_app, walk
+from .tree import OBJ, Atspi, S, T, find_app, walk
 
 
 @dataclass
@@ -88,6 +88,57 @@ def _between(nodes: list, first: tuple, last: tuple) -> list[Segment]:
     return out
 
 
+EXPAND_DEPTH = 4
+
+
+def _embedded(node, offset: int):
+    """The child an embedded-object character (U+FFFC) at `offset` stands for, or None."""
+    try:
+        k = Atspi.Hypertext.get_link_index(node, offset)
+        if k < 0:
+            return None
+        return Atspi.Hyperlink.get_object(Atspi.Hypertext.get_link(node, k), 0)
+    except Exception:
+        return None
+
+
+def expand(node, depth: int = 0) -> tuple[str, list[tuple[object, int]]]:
+    """The node's text with each embedded-object character replaced by the text of the element it stands for
+    (inline code, links, emphasis in Chromium / VS Code: a paragraph reads 'run ￼ first' and the command is a
+    child), and for every character of it, the (node, offset) it belongs to."""
+    text = _text(node) or ''
+    out: list[str] = []
+    owners: list[tuple[object, int]] = []
+    for i, ch in enumerate(text):
+        child = _embedded(node, i) if ch == OBJ and depth < EXPAND_DEPTH else None
+        if child is not None:
+            ct, co = expand(child, depth + 1)
+            out.append(ct)
+            owners += co
+        else:
+            out.append(ch)
+            owners.append((node, i))
+    return ''.join(out), owners
+
+
+def _runs(owners: list[tuple[object, int]], s: int, e: int) -> list[Segment]:
+    """Segments covering expanded-text characters [s, e): one per run of consecutive characters of one node."""
+    segs: list[Segment] = []
+    texts: dict[int, str] = {}
+    for node, off in owners[s:e]:
+        last = segs[-1] if segs else None
+        if last is not None and last.node is node and last.end == off:
+            last.end += 1
+        else:
+            segs.append(Segment(node, off, off + 1, ''))
+    for sg in segs:
+        t = texts.get(id(sg.node))
+        if t is None:
+            t = texts[id(sg.node)] = _text(sg.node) or ''
+        sg.text = t[sg.start:sg.end]
+    return [sg for sg in segs if sg.text.replace(OBJ, '').strip()]
+
+
 def _fast_path(frame, anchor: dict, quote: str) -> list[Segment] | None:
     path, end_path = anchor.get('path'), anchor.get('end_path')
     if path is None or anchor.get('start') is None or end_path is None:
@@ -97,6 +148,9 @@ def _fast_path(frame, anchor: dict, quote: str) -> list[Segment] | None:
     if text is None:
         return None
     s, e = anchor['start'], anchor.get('end', 0)
+    if anchor.get('expanded'):                          # offsets into the text with inline elements expanded
+        exp, owners = expand(node)
+        return _runs(owners, s, e) or None if _norm(exp[s:e]) == _norm(quote) else None
     terminal = anchor.get('role') == 'terminal'
     if end_path == path:
         if _norm(text[s:e]) == _norm(quote):
@@ -164,7 +218,8 @@ def locate(pid: int | None, xid: int, anchor: dict, quote: str, budget: float = 
     return resolve(nodes, anchor, quote, fast)
 
 
-def _search(nodes: list, anchor: dict, quote: str, path: tuple) -> list[Segment] | None:
+def _search(nodes: list, anchor: dict, quote: str, path: tuple, expand_inline: bool = True
+            ) -> list[Segment] | None:
     prefix, suffix = anchor.get('prefix', ''), anchor.get('suffix', '')
     terminal = anchor.get('role') == 'terminal'
     best = None
@@ -181,6 +236,9 @@ def _search(nodes: list, anchor: dict, quote: str, path: tuple) -> list[Segment]
         except Exception:
             pass
         return [Segment(node, s, e, text[s:e], terminal)]
+    found = _search_expanded(nodes, anchor, quote, path) if expand_inline else None
+    if found is not None:
+        return found[0]
     ps = parts(quote)
     if len(ps) < 2:
         return None
@@ -201,6 +259,43 @@ def _search(nodes: list, anchor: dict, quote: str, path: tuple) -> list[Segment]
             return [Segment(n0, s0, len(t0), t0[s0:])] + _between(nodes, p0, p) + \
                 [Segment(node, 0, hit[1], text[:hit[1]])]
     return None
+
+
+def _search_expanded(nodes: list, anchor: dict, quote: str, path: tuple
+                     ) -> tuple[list[Segment], tuple, int, int, str] | None:
+    """The quote inside a paragraph with inline elements (it runs through them): (segments, the paragraph's path,
+    start, end in its expanded text, expanded text). Only paragraphs sharing some text with the quote are
+    expanded (that costs a few D-Bus calls per inline element)."""
+    q = compact(quote)
+    if not q:
+        return None
+    grams = {q[i:i + 3] for i in range(max(1, len(q) - 2))}
+    prefix, suffix = anchor.get('prefix', ''), anchor.get('suffix', '')
+    best = None
+    for i, (node, p, text) in enumerate(nodes):
+        if OBJ not in text:
+            continue
+        # its own text or its inline elements' (collected right after it: the walk is depth-first) share some
+        # three characters with the quote
+        texts, j = [text], i + 1
+        while j < len(nodes) and nodes[j][1][:len(p)] == p:
+            texts.append(nodes[j][2])
+            j += 1
+        if not any(g in compact(t) for t in texts for g in grams):
+            continue
+        exp, owners = expand(node)
+        if len(exp) != len(owners):
+            continue
+        hit = find_quote(exp, quote, prefix, suffix, anchor.get('start') if p == path else None)
+        if hit:
+            key = (hit[2], p == path, len(p))
+            if best is None or key > best[0]:
+                best = (key, owners, p, hit, exp)
+    if best is None:
+        return None
+    _, owners, p, (s, e, _), exp = best
+    segs = _runs(owners, s, e)
+    return (segs, p, s, e, exp) if segs else None
 
 
 def scroll_into_view(seg: Segment) -> bool:
@@ -230,9 +325,19 @@ def anchor_from_text(pid: int | None, xid: int, quote: str, budget: float = 1.0)
         text = _text(node)
         if text and text.replace(OBJ, '').strip():
             nodes.append((node, path, text))
-    segs = _search(nodes, {}, quote, ())
+    segs = _search(nodes, {}, quote, (), expand_inline=False)
     if not segs:
-        return None
+        found = _search_expanded(nodes, {}, quote, ())       # the quote runs through inline elements
+        if found is None:
+            return None
+        segs, p, s, e, exp = found
+        try:
+            role = segs[0].node.get_role_name()
+        except Exception:
+            role = ''
+        return {'method': 'atspi', 'located_by': 'text', 'path': list(p), 'start': s, 'end_path': list(p), 'end': e,
+                'prefix': exp[max(0, s - 40):s].replace(OBJ, ''), 'suffix': exp[e:e + 40].replace(OBJ, ''),
+                'role': role, 'expanded': True}
     paths = {id(n): (p, t) for n, p, t in nodes}
     (p0, t0), (p1, t1) = paths[id(segs[0].node)], paths[id(segs[-1].node)]
     s, e = segs[0].start, segs[-1].end

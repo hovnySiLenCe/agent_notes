@@ -3,7 +3,7 @@
 Nothing appears on the real screen, no focus is stolen and the real clipboard is untouched, so end-to-end tests
 can run while you keep working.
 
-Usage:  .venv/bin/python -m tests.e2e.sandbox [--size 1600x1000] -- <command ...>
+Usage:  .venv/bin/python -m tests.e2e.sandbox [--size 1600x1000] [--composite] -- <command ...>
         .venv/bin/python -m tests.e2e.sandbox -- .venv/bin/python -m tests.e2e.run_e2e firefox
 Xvfb: on PATH, or extracted locally by scripts/setup.sh --test into .venv/syslibs/bin.
 """
@@ -60,6 +60,9 @@ def main(argv: list[str]) -> int:
     size = '1600x1000'
     if argv[:1] == ['--size']:
         size, argv = argv[1], argv[2:]
+    composite = argv[:1] == ['--composite']
+    if composite:
+        argv = argv[1:]
     if argv[:1] == ['--']:
         argv = argv[1:]
     if not argv:
@@ -79,6 +82,8 @@ def main(argv: list[str]) -> int:
         env.update(DISPLAY=f':{n}', XDG_SESSION_TYPE='x11', GNOME_ACCESSIBILITY='1', QT_ACCESSIBILITY='1',
                    GTK_IM_MODULE='gtk-im-context-simple', QT_IM_MODULE='simple', NO_AT_BRIDGE='0',
                    LIBGL_ALWAYS_SOFTWARE='1', MARGINALIA_SANDBOX='1')
+        if composite:
+            env['MINIWM_COMPOSITE'] = '1'
         # One private session bus for the WM, the apps under test and the test driver (AT-SPI rides on it).
         # Abstract socket named @/tmp/dbus-*: snap apps (Firefox) have a private /tmp and their AppArmor profile
         # only allows abstract sockets with that prefix.

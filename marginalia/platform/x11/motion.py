@@ -83,7 +83,7 @@ def shift(prev: np.ndarray, cur: np.ndarray, guess: int = 0) -> int | None:
 class Follower:
     """Follows the content at a screen point of a window while it scrolls (the selection bubble stays next to the
     selected text). Strips are taken left of the point: the bubble itself sits to its right."""
-    STRIP_W = 32
+    STRIP_W = 12
 
     def __init__(self, xid: int, x: int, y: int):
         from . import windows

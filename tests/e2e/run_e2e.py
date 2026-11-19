@@ -34,6 +34,7 @@ from marginalia.core.models import Annotation  # noqa: E402
 from marginalia.platform.atspi.geometry import vte_rects  # noqa: E402
 from marginalia.platform.atspi.tree import Atspi, S, T, walk  # noqa: E402
 from marginalia.platform.x11 import display as xd, keys, windows  # noqa: E402
+from marginalia.ui.theme import SHADOW  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / 'tests/e2e/fixtures'
@@ -143,6 +144,10 @@ class Harness:
         env = dict(os.environ, MARGINALIA_CONFIG_DIR=str(self.app_dir / 'config'),
                    MARGINALIA_DATA_DIR=str(self.app_dir / 'data'))
         self.app_dir.mkdir(parents=True, exist_ok=True)
+        (self.app_dir / 'config').mkdir(exist_ok=True)       # no plan endpoint: 127.0.0.1 is shared with the desktop
+        conf = cfgmod._merge(cfgmod.DEFAULTS, {'plan': {'port': 0}})
+        (self.app_dir / 'config' / 'config.json').write_text(json.dumps(conf, ensure_ascii=False, indent=2),
+                                                             encoding='utf-8')
         log = open(self.app_dir / 'app.log', 'w')
         self.app_proc = subprocess.Popen(['nice', '-n', '19', sys.executable, '-m', 'marginalia', '--foreground'],
                                          cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -517,7 +522,7 @@ def scenario_vscode_scroll(h: Harness) -> None:
     xid, pids = _open_vscode(h, doc)
     if not h.check('vscode window appears', xid):
         return
-    h.pump(4)
+    h.wait(lambda: quote_rect(pids, SCROLL_QUOTE), 60, 1.0)      # (slow to start at nice 19 in the sandbox)
     _vscode_dismiss_dialogs(pids)
     h.activate(xid)
     h.pump(0.5)
@@ -802,7 +807,7 @@ def scenario_highlight(h: Harness) -> None:
 
 
 def bubble_rect(h: Harness) -> tuple[int, int, int, int] | None:
-    """Screen rect of the app's selection bubble while it is shown."""
+    """Screen rect of the app's selection bubble (its visible frame) while it is shown."""
     for w in xd.root().query_tree().children:
         try:
             pid = w.get_full_property(xd.atom('_NET_WM_PID'), Xatom.CARDINAL)
@@ -812,7 +817,8 @@ def bubble_rect(h: Harness) -> tuple[int, int, int, int] | None:
             if not name or name.value != b'Marginalia bubble' or w.get_attributes().map_state != X.IsViewable:
                 continue
             g, o = w.get_geometry(), w.translate_coords(xd.root(), 0, 0)
-            return (-o.x, -o.y, g.width, g.height)
+            m = SHADOW if windows.compositing() else 0          # (transparent margin for the shadow)
+            return (-o.x + m, -o.y + m, g.width - 2 * m, g.height - 2 * m)
         except error.XError:
             continue
     return None
