@@ -63,6 +63,10 @@ class Platform(ABC):
         """Top-level windows owned by any of these processes."""
         return []
 
+    def window_with_text(self, wins: list[WindowInfo], text: str) -> int | None:
+        """worker: which of these windows shows `text` right now (terminals sharing one process), or None."""
+        return None
+
     def follower(self, xid: int, x: int, y: int):
         """Follows the content at screen point (x, y) of window `xid` as it scrolls: step() -> motion so far in px
         (None: lost), inside() -> the point is still in the window. None when unsupported."""

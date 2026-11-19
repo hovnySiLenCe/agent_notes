@@ -182,11 +182,13 @@ class ControllerPlanTest(unittest.TestCase):
         self.ctl = SimpleNamespace(
             plans=PlanStore(db), store=Store(db), cfg=cfgmod.Config(json.loads(json.dumps(cfgmod.DEFAULTS))),
             platform=SimpleNamespace(windows_of=lambda pids: [other, term] if 100 in pids else [],
-                                     active_window=lambda: None, window_exists=lambda xid: xid in (11, 12)),
+                                     active_window=lambda: None, window_exists=lambda xid: xid in (11, 12),
+                                     is_terminal=lambda w: True, window_with_text=lambda wins, text: 11),
+            worker=SimpleNamespace(submit=lambda fn, *a, cb=None, urgent=False: cb(fn(*a))),
             panel=SimpleNamespace(plan_updated=lambda p, r: self.updated.append((p, r))),
             popup=SimpleNamespace(isVisible=lambda: False), _capture_ctx=None)
         from marginalia.app import Controller
-        for name in ('receive_plan', '_plan_source', 'annotate_plan_item'):
+        for name in ('receive_plan', '_plan_source', 'annotate_plan_item', '_confirm_plan_window'):
             setattr(self.ctl, name, getattr(Controller, name).__get__(self.ctl))
         self.ctl._open_capture = lambda ctx, type_id, t: self.opened.append((ctx, type_id))
 
@@ -199,6 +201,11 @@ class ControllerPlanTest(unittest.TestCase):
         self.assertEqual(self.ctl.plans.project('note_plugin')['source']['xid'], 11)
         self.assertEqual(self.updated[0][0], 'note_plugin')
         self.assertFalse(self.ctl.receive_plan({'project': 'x', 'text': '   '})['ok'])
+
+    def test_terminal_window_is_told_apart_by_its_screen(self):
+        """All terminal windows share one process and no title names the project: the screen text decides."""
+        self.ctl.receive_plan({'project': 'other_project', 'text': PASTED, 'pids': [100]})
+        self.assertEqual(self.ctl.plans.project('other_project')['source']['xid'], 11)
 
     def test_annotating_an_item(self):
         self.ctl.receive_plan({'project': 'note_plugin', 'text': PASTED, 'pids': [100]})

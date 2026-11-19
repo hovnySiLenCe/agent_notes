@@ -112,6 +112,27 @@ class X11Platform(Platform):
                 out.append(w)
         return out
 
+    def window_with_text(self, wins: list[WindowInfo], text: str) -> int | None:
+        from ...core.anchor import compact
+        from ..atspi.locate import frames_for
+        from ..atspi.tree import S, T, walk
+        needle = compact(text)[:60]
+        if not needle:
+            return None
+        for w in wins:
+            frames = frames_for(w.pid, w.xid)
+            if not frames:
+                continue
+            for node, _, _ in walk(frames[0], time.monotonic() + 0.3, max_nodes=400):
+                try:
+                    if node.get_role_name() != 'terminal' or not node.get_state_set().contains(S.SHOWING):
+                        continue
+                    if needle in compact(T.get_text(node, 0, T.get_character_count(node))):
+                        return w.xid
+                except Exception:
+                    continue
+        return None
+
     def follower(self, xid: int, x: int, y: int):
         """Something whose step() returns how far the content at (x, y) has scrolled (or None); None if the
         pixels can't be watched (no compositor: the window's image would include our own windows)."""

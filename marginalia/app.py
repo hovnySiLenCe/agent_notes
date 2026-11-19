@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import faulthandler
 import json
+import re
 import logging
 import os
 import signal
@@ -353,7 +354,33 @@ class Controller(QObject):
         log.info('plan %r: +%d -%d =%d (window %s)', project, res['added'], res['removed'], res['kept'],
                  source.get('xid'))
         self.panel.plan_updated(project, res)
+        self._confirm_plan_window(project, payload, sections)
         return {'ok': True, **res}
+
+    def _confirm_plan_window(self, project: str, payload: dict, sections: list) -> None:
+        """Terminal windows of one terminal process can't be told apart by their owner: the one whose screen
+        shows the plan just printed is the agent's. Checked in the background."""
+        pids = {p for p in payload.get('pids') or [] if isinstance(p, int)}
+        wins = self.platform.windows_of(pids) if pids else []
+        if len(wins) < 2 or not all(self.platform.is_terminal(w) for w in wins):
+            return
+        # the last item: the plan ends the reply, so it is at the bottom of the screen (the agent's terminal renders
+        # markdown: no `code` / **bold** marks on screen)
+        lines = [re.sub(r'[`*_]', '', it.split('\n')[0]) for _, items in sections for it in items]
+        sample = next((ln for ln in reversed(lines) if len(ln.strip()) >= 8), '')
+        if not sample:
+            return
+
+        def done(xid):
+            proj = self.plans.project(project)
+            if not isinstance(xid, int) or proj is None or proj['source'].get('xid') == xid:
+                return
+            w = next((w for w in wins if w.xid == xid), None)
+            if w is not None:
+                log.info('plan %r: window %s shows it on screen', project, xid)
+                self.plans.set_source(project, dict(proj['source'], xid=w.xid, pid=w.pid, wm_class=w.wm_class,
+                                                    title=w.title))
+        self.worker.submit(self.platform.window_with_text, wins, sample, cb=done)
 
     def read_plan(self, project: str) -> dict | None:
         if self.plans.project(project) is None:
